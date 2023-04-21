@@ -18,6 +18,7 @@
 	var lastMessage = {};
 	
 	function processMessage(ele){
+		
 		var chatimg = "";
 		var msg = "";
 		
@@ -35,6 +36,10 @@
 			  msg = ele.querySelector('.commenter_content').innerText;
 			} 
 		} catch(e){}
+		
+		if (!name){
+			return; // this might be a duplicate. 
+		}
 		
 		var data = {};
 		data.chatname = name;
@@ -54,14 +59,8 @@
 		}
 		lastMessage = JSON.stringify(data);
 		
-		if (data.chatimg){
-			toDataURL(data.chatimg, function(dataUrl) {
-				data.chatimg = dataUrl;
-				pushMessage(data);
-			});
-		} else {
-			pushMessage(data);
-		}
+		pushMessage(data);
+		
 	}
 
 	function pushMessage(data){
@@ -70,12 +69,14 @@
 		} catch(e){}
 	}
 	
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 
@@ -87,14 +88,12 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){}
 			sendResponse(false);

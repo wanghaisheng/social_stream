@@ -34,7 +34,7 @@
 		var chatimg = "";
 
 		try{
-			chatname = ele.children[1].children[1].children[1].children[0].dataset.prePlainText
+			chatname = ele.children[1].children[1].children[0].children[0].textContent;
 			if (chatname.split("] ").length>1){
 				chatname = chatname.split("] ")[1];
 			}
@@ -92,18 +92,32 @@
 			}
 		}
 
-		if (!textOnlyMode){
+
+		try{
+			if (!chatname){
+				chatname = ele.children[1].children[1].children[0].children[0].textContent;
+				if (chatname.split("] ").length>1){
+					chatname = chatname.split("] ")[1];
+				}
+				chatname = chatname.split(":")[0];
+				chatname = chatname.trim();
+			}
+		} catch(e){
+			chatname = "";
+		}
+		
+		if (!settings.textonlymode){
 			try {
 				chatmessage = ele.querySelector(".selectable-text.copyable-text");
-				if (chatmessage && chatmessage.tagName && (chatmessage.tagName == "IMG")){
-					if (chatmessage.alt){
-						chatmessage = chatmessage.alt;
-					}
-				} else if (chatmessage && chatmessage.querySelector("img")){
-					chatmessage.querySelectorAll("img[alt]").forEach(ele=>{
-						ele.outerHTML = ele.alt;
-					});
-				} 
+				//if (chatmessage && chatmessage.tagName && (chatmessage.tagName == "IMG")){
+				//	if (chatmessage.alt){
+				//		chatmessage = chatmessage.alt;
+				//	}
+				//} else if (chatmessage && chatmessage.querySelector("img")){
+				//	chatmessage.querySelectorAll("img[alt]").forEach(ele=>{
+				//		ele.outerHTML = ele.alt;
+				//	});
+				//} 
 				chatmessage = chatmessage.innerHTML;
 			} catch(e){
 				chatmessage = "";
@@ -118,10 +132,7 @@
 		} else {
 			try {
 				chatmessage = ele.querySelector(".selectable-text.copyable-text").innerText;
-				//console.log(chatmessage);
 			} catch(e){
-			//	console.error(e);
-				return;
 			}
 		}
 		
@@ -139,9 +150,9 @@
 		data.hasMembership = "";
 		data.type = "whatsapp";
 		
-		//console.log(data);
+		console.log(data);
 	  
-		if (data.chatimg && avatars){
+		if (data.chatimg){
 			toDataURL(data.chatimg, function(dataUrl) {
 				data.chatimg = dataUrl;
 				try {
@@ -169,41 +180,27 @@
 					sendResponse(true);
 					return;
 				} 
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 				
-				if ("noAvatars" == request){
-					avatars = false;
-					sendResponse(true);
-					return;
-				} else if ("sendAvatars" == request){
-					avatars = true;
-					sendResponse(true);
-					return;
-				}
 			} catch(e){}
 			sendResponse(false);
 		}
 	);
-	var avatars = true;
-	var textOnlyMode = false;
+	
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
-		}
-		if ("settings" in response){
-			if ("noavatars" in response.settings){
-				avatars = !response.settings.noavatars;
-			}
+			settings = response.settings;
 		}
 	});
 
@@ -211,21 +208,13 @@
 		var onMutationsObserved = function(mutations) {
 			mutations.forEach(function(mutation) {
 				if (mutation.addedNodes.length) {
-					for (var i = 0, len = mutation.addedNodes.length; i < len; i++) {
-						try {
-							if (mutation.addedNodes[i].dataset.id) {
-								//console.log(mutation.addedNodes[i]);
-								if (mutation.addedNodes[i].set123){continue;}
-								mutation.addedNodes[i].set123 = true;
-								//console.log(mutation.addedNodes[i]);
-								setTimeout(function(ele){
-									callback(ele);
-								}, 300, mutation.addedNodes[i]);
-							} else{
-								//console.warn(mutation.addedNodes[i]);
-							}
-						} catch(e){}
-					}
+					document.querySelector("#main").querySelectorAll("[data-id]:not([data-set123])").forEach((xx)=>{
+						xx.dataset.set123 = true;
+						console.log(xx);
+						setTimeout(function(ele){
+							callback(ele);
+						}, 300, xx); // give it time to load fully
+					});
 				}
 			});
 		};
@@ -240,22 +229,60 @@
 	
 	
 	setInterval(function(){
-		var ele = document.querySelector("[role='region']")
-		//console.log("checking");
+		var ele = document.querySelector("#main");
 		if (ele && !ele.started){
 			ele.started = true;
-		//	console.log("GOOD");
 			
-			ele.querySelectorAll("[data-id]").forEach(ele=>{
-				ele.set123 = true;
-			});
-			
-			onElementInserted(ele, function(element){
-				processMessage(element);
-			});
+			setTimeout(function(ele){
+				if (ele){
+					document.querySelector("#main").querySelectorAll("[data-id]:not([data-set123])").forEach((xx)=>{
+						xx.dataset.set123 = true;
+					});
+					onElementInserted(ele, function(element){
+						processMessage(element);
+					});
+				}
+			}, 2000, ele);
 		}
 		
 	},1000);
 
+
+	///////// the following is a loopback webrtc trick to get chrome to not throttle this twitch tab when not visible.
+	try {
+		var receiveChannelCallback = function(e){
+			remoteConnection.datachannel = event.channel;
+			remoteConnection.datachannel.onmessage = function(e){};;
+			remoteConnection.datachannel.onopen = function(e){};;
+			remoteConnection.datachannel.onclose = function(e){};;
+			setInterval(function(){
+				if (document.hidden){ // only poke ourselves if tab is hidden, to reduce cpu a tiny bit.
+					remoteConnection.datachannel.send("KEEPALIVE")
+				}
+			}, 800);
+		}
+		var errorHandle = function(e){}
+		var localConnection = new RTCPeerConnection();
+		var remoteConnection = new RTCPeerConnection();
+		localConnection.onicecandidate = (e) => !e.candidate ||	remoteConnection.addIceCandidate(e.candidate).catch(errorHandle);
+		remoteConnection.onicecandidate = (e) => !e.candidate || localConnection.addIceCandidate(e.candidate).catch(errorHandle);
+		remoteConnection.ondatachannel = receiveChannelCallback;
+		localConnection.sendChannel = localConnection.createDataChannel("sendChannel");
+		localConnection.sendChannel.onopen = function(e){localConnection.sendChannel.send("CONNECTED");};
+		localConnection.sendChannel.onclose =  function(e){};
+		localConnection.sendChannel.onmessage = function(e){};
+		localConnection.createOffer()
+			.then((offer) => localConnection.setLocalDescription(offer))
+			.then(() => remoteConnection.setRemoteDescription(localConnection.localDescription))
+			.then(() => remoteConnection.createAnswer())
+			.then((answer) => remoteConnection.setLocalDescription(answer))
+			.then(() =>	{
+				localConnection.setRemoteDescription(remoteConnection.localDescription);
+				console.log("KEEP ALIVE TRICk ENABLED");
+			})
+			.catch(errorHandle);
+	} catch(e){
+		console.log(e);
+	}
 	
 })();

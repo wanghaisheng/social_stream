@@ -1,6 +1,6 @@
 var isExtensionOn = false;
 var iframe = null;
-var channel = null;
+
 var settings = {};
 var messageTimeout = 0;
 var lastSentMessage = "";
@@ -19,31 +19,76 @@ function generateStreamID(){
 		text = text.replaceAll('Ad', 'vdAv');
 		text = text.replaceAll('ad', 'vdav');
 		text = text.replaceAll('aD', 'vDav');
-	} catch(e){console.log(e);}
+	} catch(e){}
 	return text;
 };
 
 
-var properties = ["streamID", "isExtensionOn"];
-channel = generateStreamID();
+var properties = ["streamID", "password", "isExtensionOn", "settings"];
+var channel = generateStreamID();
+var password = false;
 
-chrome.storage.sync.get(properties, function(item){
+function loadSettings(item, resave=false){
 	if (item && item.streamID){
 		channel = item.streamID;
+		if (resave){
+			chrome.storage.sync.set({
+				streamID: channel
+			});
+			chrome.runtime.lastError;
+		}
 	} else {
 		chrome.storage.sync.set({
 			streamID: channel
 		});
 		chrome.runtime.lastError;
 	}
+	if (item && ("password" in item)){
+		password = item.password;
+
+		if (resave){
+			chrome.storage.sync.set({
+				password: password
+			});
+			chrome.runtime.lastError;
+		}
+
+	} else {
+		chrome.storage.sync.set({
+			password: password
+		});
+		chrome.runtime.lastError;
+	}
 	if (item && item.settings){
 		settings = item.settings;
+
+		if (resave){
+			chrome.storage.sync.set({
+				settings: settings
+			});
+			chrome.runtime.lastError;
+		}
+	} else {
+		chrome.storage.sync.set({
+			settings: settings
+		});
+		chrome.runtime.lastError;
 	}
+	
 	if (item && item.isExtensionOn){
 		isExtensionOn = item.isExtensionOn;
 		chrome.browserAction.setIcon({path: "/icons/on.png"});
 		if (iframe==null){
-			loadIframe(channel);
+			loadIframe(channel, password);
+		}
+
+		setupSocket();
+
+		if (resave){
+			chrome.storage.sync.set({
+				isExtensionOn: isExtensionOn
+			});
+			chrome.runtime.lastError;
 		}
 	}  else {
 		chrome.storage.sync.set({
@@ -53,22 +98,27 @@ chrome.storage.sync.get(properties, function(item){
 	}
 	toggleMidi();
 	
+	
 	if (settings.sentiment){
 		if (!sentimentAnalysisLoaded){
 			loadSentimentAnalysis();
 		}
 	}
-	
+}
+
+
+chrome.storage.sync.get(properties, function(item){
+	loadSettings(item);
 });
 
 chrome.browserAction.setIcon({path: "/icons/off.png"});
 
-function pushSettingChange(setting){
+function pushSettingChange(){
 	chrome.tabs.query({}, function(tabs) {
 		chrome.runtime.lastError;
 		for (var i=0;i<tabs.length;i++){
-			if (!tabs[i].url){continue;} 
-			chrome.tabs.sendMessage(tabs[i].id, setting, function(response=false) {
+			if (!tabs[i].url){continue;}
+			chrome.tabs.sendMessage(tabs[i].id, {settings:settings, isExtensionOn:isExtensionOn}, function(response=false) {
 				chrome.runtime.lastError;
 			});
 		}
@@ -78,6 +128,209 @@ function pushSettingChange(setting){
 function sleep(ms = 0) {
 	return new Promise(r => setTimeout(r, ms)); // LOLz!
 }
+async function loadmidi(){
+	const opts = {
+		types: [{
+		  description: 'JSON file',
+		  accept: {'text/plain': ['.json', '.txt', '.data', '.midi']},
+		}],
+	  };
+	var midiFileHandler = await window.showOpenFilePicker();
+
+	try {
+		var midiConfigFile = await midiFileHandler[0].getFile();
+		midiConfigFile = await midiConfigFile.text();
+		settings.midiConfig = JSON.parse(midiConfigFile);
+	} catch(e){
+		settings.midiConfig = false;
+		console.log(e);
+		alert("File does not contain a valid JSON structure");
+	}
+	chrome.storage.sync.set({
+		settings: settings
+	});
+	chrome.runtime.lastError;
+}
+
+var newFileHandle = false;
+async function overwriteFile(data=false) {
+  if (data=="setup"){
+	  
+	   const opts = {
+		types: [
+		  {
+			description: "JSON data",
+			accept: { "text/plain": [".txt"], "application/json": [".json"] },
+		  },
+		],
+	  };
+	  
+	  newFileHandle = await window.showSaveFilePicker(opts);
+  } else if (newFileHandle && data){
+	  const writableStream = await newFileHandle.createWritable();
+	  await writableStream.write(data);
+	  await writableStream.close();
+  }
+}
+
+var newSavedNamesFileHandle = false;
+var uniqueNameSet = [];
+async function overwriteSavedNames(data=false) {
+  if (data=="setup"){
+	  uniqueNameSet = [];
+	  
+	  const opts = {
+		types: [
+		  {
+			description: "Text file",
+			accept: { "text/plain": [".txt"] },
+		  },
+		],
+	  };
+		  
+	  newSavedNamesFileHandle = await window.showSaveFilePicker(opts);
+  } else if (newSavedNamesFileHandle && data){
+	  if (uniqueNameSet.includes(data)){return;}
+	  uniqueNameSet.push(data);
+	  const writableStream = await newSavedNamesFileHandle.createWritable();
+	  await writableStream.write(uniqueNameSet.join("\r\n"));
+	  await writableStream.close();
+  }
+}
+
+
+/* var newFileHandleExcel = false;
+async function overwriteFileExcel(data=false) {
+  if (data=="setup"){
+	  newFileHandleExcel = await window.showSaveFilePicker();
+  } else if (newFileHandleExcel && data){
+	  const size = (await newFileHandleExcel.getFile()).size;
+	  const writableStream = await newFileHandleExcel.createWritable();
+	  await writableStream.write( type: "write",
+		  data: data,
+		  position: size // Set the position to the current file size.
+	  });
+	  await writableStream.close();
+  }
+} */
+
+var workbook = false;
+var worksheet = false;
+var table = [];
+
+var newFileHandleExcel = false;
+async function overwriteFileExcel(data=false) {
+	if (data=="setup"){
+
+		 const opts = {
+			types: [{
+			  description: 'Excel file',
+			  accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']},
+			}],
+		  };
+
+		newFileHandleExcel = await window.showSaveFilePicker(opts);
+		workbook = XLSX.utils.book_new();
+
+		data = [];
+
+		worksheet = XLSX.utils.aoa_to_sheet(data);
+		workbook.SheetNames.push("SocialStream-"+channel);
+		workbook.Sheets["SocialStream-"+channel] = worksheet;
+
+		var xlsbin = XLSX.write(workbook, {
+			bookType: "xlsx",
+			type: "binary"
+		});
+
+		var buffer = new ArrayBuffer(xlsbin.length),
+		array = new Uint8Array(buffer);
+		for (var i=0; i<xlsbin.length; i++) {
+			array[i] = xlsbin.charCodeAt(i) & 0XFF;
+		}
+		var xlsblob = new Blob([buffer], {type:"application/octet-stream"});
+		delete array; delete buffer; delete xlsbin;
+
+		const writableStream = await newFileHandleExcel.createWritable();
+		await writableStream.write(xlsblob);
+		await writableStream.close();
+
+	} else if (newFileHandleExcel && data){
+
+		for (var key in data){
+			if (!table.includes(key)){
+				table.push(key);
+			}
+		}
+		var column = [];
+		table.forEach(key=>{
+			if (key in data){
+				column.push(data[key]);
+			} else {
+				column.push("");
+			}
+		});
+
+
+		XLSX.utils.sheet_add_aoa(worksheet, [table], {origin: 0}); // replace header
+		XLSX.utils.sheet_add_aoa(worksheet, [column], {origin: -1}); // append new line
+
+		var xlsbin = XLSX.write(workbook, {
+			bookType: "xlsx",
+			type: "binary"
+		})
+
+		var buffer = new ArrayBuffer(xlsbin.length),
+		array = new Uint8Array(buffer);
+		for (var i=0; i<xlsbin.length; i++) {
+			array[i] = xlsbin.charCodeAt(i) & 0XFF;
+		}
+		var xlsblob = new Blob([buffer], {type:"application/octet-stream"});
+		delete array; delete buffer; delete xlsbin;
+
+		const writableStream = await newFileHandleExcel.createWritable();
+		await writableStream.write(xlsblob);
+		await writableStream.close();
+	}
+}
+
+async function exportSettings(){
+	chrome.storage.sync.get(properties, async function(item){
+		 const opts = {
+			types: [{
+			  description: 'Data file',
+			  accept: {'application/data': ['.data']},
+			}],
+		  };
+		if (!window.showSaveFilePicker){
+			console.warn("Open `brave://flags/#file-system-access-api` and enable to use the File API");
+		}
+		fileExportHandler = await window.showSaveFilePicker(opts);
+
+		const writableStream = await fileExportHandler.createWritable();
+		await writableStream.write(JSON.stringify(item));
+		await writableStream.close();
+
+	})
+}
+
+async function importSettings(item){
+	const opts = {
+		types: [{
+		  description: 'JSON file',
+		  accept: {'text/plain': ['.data']},
+		}],
+	  };
+	var importFileHandler = await window.showOpenFilePicker();
+	try {
+		var importFile = await importFileHandler[0].getFile();
+		importFile = await importFile.text();
+		loadSettings(JSON.parse(importFile));
+	} catch(e){
+		alert("File does not contain a valid JSON structure");
+	}
+}
+
 
 var Url2ChannelImg = {};
 var vid2ChannelImg = {};
@@ -123,7 +376,7 @@ function getYoutubeAvatarImage(url, skip=false){
 			sleep(200);
 			if (vid2ChannelImg[videoid]){return vid2ChannelImg[videoid];}
 		}
-	} catch(e){console.error(e);}
+	} catch(e){}
 	return false;
 }
 function YouTubeGetID(url){
@@ -137,7 +390,39 @@ function YouTubeGetID(url){
   }
   return ID;
 }
-		
+
+var colours = 167772;
+function rainbow(step) {
+	var r, g, b;
+	var h = 1 - (step / colours);
+	var i = ~~(h * 6);
+	var f = h * 6 - i;
+	var q = 1 - f;
+	switch(i % 6){
+		case 0: r = 1, g = f, b = 0; break;
+		case 1: r = q, g = 1, b = 0; break;
+		case 2: r = 0, g = 1, b = f; break;
+		case 3: r = 0, g = q, b = 1; break;
+		case 4: r = f, g = 0, b = 1; break;
+		case 5: r = 1, g = 0, b = q; break;
+	}
+	var c = "#" + ("00" + (~ ~(r * 200+35)).toString(16)).slice(-2) + ("00" + (~ ~(g * 200 +35)).toString(16)).slice(-2) + ("00" + (~ ~(b * 200 +35)).toString(16)).slice(-2);
+	return (c);
+}
+
+function getColorFromName(str) {
+  var out = 0, len = str.length;
+  if (len>6){
+	  len = 6;
+  }
+  for (pos = 0; pos < len; pos++) {
+    out += (str.charCodeAt(pos) - 64) * Math.pow(26, len - pos - 1);
+  }
+  out = out%colours; // get modulus
+  out = rainbow(out)
+  return out;
+}
+
 chrome.runtime.onMessage.addListener(
     async function (request, sender, sendResponse) {
 		try{
@@ -145,48 +430,122 @@ chrome.runtime.onMessage.addListener(
 				isExtensionOn = request.data.value;
 				if (isExtensionOn){
 					if (iframe==null){
-						loadIframe(channel);
+						loadIframe(channel, password);
 					}
+					setupSocket();
+					setupSocketDock();
 				} else {
 					if (iframe.src){
 						iframe.src = null;
 					}
 					iframe.remove();
 					iframe = null;
+					
+					if (socketserver){
+						socketserver.close();
+					}
+					
+					if (socketserverDock){
+						socketserverDock.close();
+					}
 				}
 				chrome.storage.sync.set({
 					isExtensionOn: isExtensionOn
 				});
 				chrome.runtime.lastError;
 				toggleMidi();
-				sendResponse({"state":isExtensionOn,"streamID":channel, "settings":settings});
-			} else if (request.cmd && request.cmd === "getOnOffState") {
-				sendResponse({"state":isExtensionOn,"streamID":channel, "settings":settings});
-			} else if (request.cmd && request.cmd === "saveSetting") {
-				settings[request.setting] = request.value;
-				chrome.storage.sync.set(settings);
-				chrome.runtime.lastError;
-				sendResponse({"state":isExtensionOn});	
+				sendResponse({"state":isExtensionOn,"streamID":channel, "password":password, "settings":settings});
 				
+				pushSettingChange();
+				
+			} else if (request.cmd && request.cmd === "getOnOffState") {
+				sendResponse({"state":isExtensionOn,"streamID":channel, "password":password, "settings":settings});
+			} else if (request.cmd && request.cmd === "saveSetting") {
+				if (typeof settings[request.setting] == "object"){
+					if (!request.value){
+						delete settings[request.setting];
+					} else {
+						settings[request.setting][request.type] = request.value;
+						settings[request.setting].value = request.value;
+					}
+				} else if ("type" in request){
+					if (!request.value){
+						delete settings[request.setting];
+					} else {
+						settings[request.setting] = {};
+						settings[request.setting][request.type] = request.value;
+						settings[request.setting].value = request.value;
+					}
+				} else {
+					settings[request.setting] = request.value;
+				}
+
+				chrome.storage.sync.set({
+					settings: settings
+				});
+				chrome.runtime.lastError;
+				sendResponse({"state":isExtensionOn});
+
+
 				if (request.setting == "midi"){
 					toggleMidi();
 				}
+
+				if (request.setting == "socketserver"){
+					if (request.value){
+						if (!socketserver){
+							socketserver = new WebSocket(serverURL);
+							setupSocket();
+						}
+					} else {
+						if (socketserver){
+							socketserver.close();
+						}
+					}
+				}
+				
+				if (request.setting == "server2"){
+					if (request.value){
+						if (!socketserverDock){
+							socketserverDock = new WebSocket(serverURLDock);
+							setupSocketDock();
+						}
+					} else {
+						if (socketserverDock){
+							socketserverDock.close();
+						}
+					}
+				}
+
 				if (request.setting == "textonlymode"){
-					if (request.value){
-						pushSettingChange("textOnlyMode");
-					} else {
-						pushSettingChange("richTextMode");
-					}
-				} 
+					pushSettingChange();
+				}
 				
-				if (request.setting == "noavatars"){
-					if (request.value){
-						pushSettingChange("noAvatars");
-					} else {
-						pushSettingChange("sendAvatars");
-					}
-				} 
-				
+				if (request.setting == "customtwitchstate"){
+					pushSettingChange();
+				}
+				if (request.setting == "customtwitchaccount"){
+					pushSettingChange();
+				}
+				if (request.setting == "customyoutubestate"){
+					pushSettingChange();
+				}
+				if (request.setting == "customyoutubeaccount"){
+					pushSettingChange();
+				}
+
+				if (request.setting == "myname"){
+					pushSettingChange();
+				}
+
+				if (request.setting == "nosubcolor"){
+					pushSettingChange();
+				}
+
+				if (request.setting == "captureevents"){
+					pushSettingChange();
+				}
+
 				if (request.setting == "sentiment"){
 					if (request.value){
 						if (!sentimentAnalysisLoaded){
@@ -194,34 +553,28 @@ chrome.runtime.onMessage.addListener(
 						}
 					}
 				}
-				
+			} else if ("inject" in request){
+				if (request.inject == "mobcrush"){
+					chrome.webNavigation.getAllFrames({tabId: sender.tab.id}, (frames) => {
+						frames.forEach(f=>{
+							if (f.frameId && (f.frameType==="sub_frame") && f.url.includes("https://www.mobcrush.com/")){
+								chrome.tabs.executeScript(sender.tab.id, {
+								  frameId: f.frameId,
+								  file: 'mobcrush.js'
+								});
+							}
+						});
+					});
+				}
 			} else if ("message" in request) { // forwards messages from Youtube/Twitch/Facebook to the remote dock via the VDO.Ninja API
-				request.message.tid = sender.tab.id; // including the source (tab id) of the social media site the data was pulled from 
+				request.message.tid = sender.tab.id; // including the source (tab id) of the social media site the data was pulled from
 				sendResponse({"state":isExtensionOn}); // respond to Youtube/Twitch/Facebook with the current state of the plugin; just as possible confirmation.
-				
-				if (isExtensionOn){
-					if (!settings.discord){
-						try {
-							if (request.message.type == "discord"){
-								return;
-							}
-						} catch(e){}
+
+				if (isExtensionOn && request.message.type){
+					if (!checkIfAllowed(request.message.type)){ // toggled is not enabled for this site
+						return;
 					}
-					if (!settings.slack){
-						try {
-							if (request.message.type == "slack"){
-								return;
-							}
-						} catch(e){}
-					}
-					if (!settings.telegram){
-						try {
-							if (request.message.type == "telegram"){
-								return;
-							}
-						} catch(e){}
-					}
-					
+
 					if (request.message.type == "youtube"){
 						if (sender.tab.url){
 							var brandURL = getYoutubeAvatarImage(sender.tab.url); // query my API to see if I can resolve the Channel avatar from the video ID
@@ -230,43 +583,150 @@ chrome.runtime.onMessage.addListener(
 							}
 						}
 					}
-					
+
 					try{
 						request.message = await applyBotActions(request.message); // perform any immediate actions
 						if (request.message===null){return;}
 					} catch(e){console.log(e);}
-					
-					if (("firstsourceonly" in settings) && settings.firstsourceonly){
-						if (verifyOriginal(request.message)){
-							sendDataP2P(request.message); // send the data to the dock
-						}
-					} else {
-						sendDataP2P(request.message);
+
+
+					if (settings.filtercommands && request.message.chatmessage && request.message.chatmessage.startsWith("!")){
+						return;
 					}
-					
+
+					if (settings.firstsourceonly){
+						if (!verifyOriginal(request.message)){
+							return;
+						}
+					}
+
+					sendToDestinations(request.message); // send the data to the dock
 				}
 			} else if ("getSettings" in request) { // forwards messages from Youtube/Twitch/Facebook to the remote dock via the VDO.Ninja API
-				sendResponse({"settings":settings}); // respond to Youtube/Twitch/Facebook with the current state of the plugin; just as possible confirmation.
+				sendResponse({"settings":settings, isExtensionOn:isExtensionOn}); // respond to Youtube/Twitch/Facebook with the current state of the plugin; just as possible confirmation.
+			} else if ("keepAlive" in request) { // forwards messages from Youtube/Twitch/Facebook to the remote dock via the VDO.Ninja API
+				var action = {};
+				action.tid = sender.tab.id; // including the source (tab id) of the social media site the data was pulled from
+				action.response = ""; // empty response, as we just want to keep alive
+				processResponse(action);
+				sendResponse({"state":isExtensionOn});
 			} else if (request.cmd && request.cmd === "tellajoke") {
 				tellAJoke();
 				sendResponse({"state":isExtensionOn});
+			} else if (request.cmd && request.cmd === "enableYouTube") {
+				enableYouTube();
+				sendResponse({"state":isExtensionOn});
+			} else if (request.cmd && request.cmd === "openchat") {
+				openchat(request.value);
+				sendResponse({"state":isExtensionOn});
+			} else if (request.cmd && request.cmd === "singlesave") {
+				sendResponse({"state":isExtensionOn});
+				overwriteFile("setup");
+			} else if (request.cmd && request.cmd === "excelsave") {
+				sendResponse({"state":isExtensionOn});
+				overwriteFileExcel("setup");
+			} else if (request.cmd && request.cmd === "savenames") {
+				sendResponse({"state":isExtensionOn});
+				overwriteSavedNames("setup");
+			} else if (request.cmd && request.cmd === "loadmidi") {
+				await loadmidi(sendResponse);
+				sendResponse({"settings":settings});
+			} else if (request.cmd && request.cmd === "export") {
+				sendResponse({"state":isExtensionOn});
+				await exportSettings();
+			} else if (request.cmd && request.cmd === "import") {
+				sendResponse({"state":isExtensionOn});
+				await importSettings();
+			} else if (request.cmd && request.cmd === "excelsaveStop") {
+				sendResponse({"state":isExtensionOn});
+				newFileHandleExcel = false;
+			} else if (request.cmd && request.cmd === "singlesaveStop") {
+				sendResponse({"state":isExtensionOn});
+				newFileHandle = false;
+			} else if (request.cmd && request.cmd === "singlesaveStop") {
+				sendResponse({"state":isExtensionOn});	
+				newSavedNamesFileHandle = false;
+			} else if (request.cmd && request.cmd === "fakemsg") {
+				sendResponse({"state":isExtensionOn});
+				var data = {};
+				data.chatname = "John Doe";
+				data.nameColor = "";
+				data.chatbadges = "";
+				data.backgroundColor = "";
+				data.textColor = "";
+				data.chatmessage = "Looking good! 😘😘😊  This is a test message. 🎶🎵🎵🔨 ";
+				data.chatimg = "";
+				data.type = "youtube";
+				if (Math.random()>0.90){
+					data.hasDonation = "100 gold";
+					data.hasMembership = "";
+					data.chatname = "Bob";
+					data.chatbadges = [];
+					var html = {};
+					html.html = '<svg viewBox="0 0 16 16" preserveAspectRatio="xMidYMid meet" focusable="false" class="style-scope yt-icon" style="pointer-events: none; display: block; width: 100%; height: 100%; fill: rgb(95, 132, 241);"><g class="style-scope yt-icon"><path d="M9.64589146,7.05569719 C9.83346524,6.562372 9.93617022,6.02722257 9.93617022,5.46808511 C9.93617022,3.00042984 7.93574038,1 5.46808511,1 C4.90894765,1 4.37379823,1.10270499 3.88047304,1.29027875 L6.95744681,4.36725249 L4.36725255,6.95744681 L1.29027875,3.88047305 C1.10270498,4.37379824 1,4.90894766 1,5.46808511 C1,7.93574038 3.00042984,9.93617022 5.46808511,9.93617022 C6.02722256,9.93617022 6.56237198,9.83346524 7.05569716,9.64589147 L12.4098057,15 L15,12.4098057 L9.64589146,7.05569719 Z" class="style-scope yt-icon"></path></g></svg>';
+					html.type = "svg";
+					data.chatbadges.push(html);
+
+				} else if (Math.random()>0.83){
+					data.hasDonation = "3 hearts";
+					data.hasMembership = "";
+					data.chatmessage = "";
+					data.chatname = "Lucy";
+				} else if (Math.random()>0.7){
+					data.hasDonation = "";
+					data.hasMembership = "";
+					data.chatname = "vdoninja";
+					data.type = "twitch";
+					var score = parseInt(Math.random()* 378);
+					data.chatmessage  =  jokes[score]["setup"] + "..  " + jokes[score]["punchline"]  + " 😊";
+				} else if (Math.random()>0.6){
+					data.hasDonation = "";
+					data.hasMembership =  '';
+					data.chatname = "Steve";
+					var score = parseInt(Math.random()* 378);
+					data.chatmessage  =  '<img src="https://github.com/steveseguin/social_stream/raw/main/icons/icon-128.png">😁';
+				} else if (Math.random()>0.5){
+					data.hasDonation = "";
+					data.nameColor = "#107516";
+					data.chatimg = "sampleavatar.png";
+					data.hasMembership =  '<div class="donation membership">SPONSORSHIP</div>';
+					data.chatname = "Steve";
+					data.type = "facebook";
+					data.chatmessage  = "The only way to do great work is to love what you do. If you haven't found it yet, keep looking. Don't settle. As with all matters of the heart, you'll know when you find it.";
+				} else if (Math.random()>0.2){
+					data.hasDonation = "";
+					data.hasMembership = "";
+					data.question = true;
+					data.chatname = "Nich Lass";
+					data.chatimg = 'https://yt4.ggpht.com/ytc/AL5GRJVWK__Edij5fA9Gh-aD7wSBCe_zZOI4jjZ1RQ=s32-c-k-c0x00ffffff-no-rj';
+				} else {
+					data.hasDonation = "";
+					data.hasMembership = '<div class="donation membership">SPONSORSHIP</div>';
+				}
+
+				data = await applyBotActions(data); // perform any immediate (custom) actions, including modifying the message before sending it out
+				sendToDestinations(data);
+
 			} else if (request.cmd && request.cmd === "sidUpdated") {
-				if (request.value){
-					channel = request.value;
+				if (request.streamID){
+					channel = request.streamID;
+				}
+				if ("password" in request){
+					password = request.password;
 				}
 				if (iframe){
 					if (iframe.src){
 						iframe.src = null;
 					}
-					
+
 					iframe.remove();
 					iframe = null;
 				}
 				if (isExtensionOn){
-					loadIframe(channel);
+					loadIframe(channel, password);
 				}
-				
-				sendResponse({"state":isExtensionOn});		
+
+				sendResponse({"state":isExtensionOn});
 			} else {
 				sendResponse({"state":isExtensionOn});
 			}
@@ -379,22 +839,492 @@ function verifyOriginal(msg){
 		} else {
 			return false;
 		}
-	} catch(e){console.error(e);}
+	} catch(e){}
 	return true;
 }
 
+function ajax(object2send, url, ajaxType="PUT"){
+	var xhttp = new XMLHttpRequest();
+	xhttp.onreadystatechange = function() {
+	if (this.readyState == 4 && this.status == 200) {
+		// success
+	} else {
+		console.error("there was an error sending to the API");
+	}
+	};
+	xhttp.open(ajaxType, url, true); // async = true
+	xhttp.setRequestHeader('Content-Type', 'application/json; charset=utf-8');
+	xhttp.send(JSON.stringify(object2send));
+}
+
+var messageCounter = 0;
+function sendToDestinations(message){
+
+	if (typeof message == "object"){
+		messageCounter+=1;
+		message.id = messageCounter;
+	}
+	if (settings.randomcolor && message && !message.nameColor && message.chatname){
+		message.nameColor = getColorFromName(message.chatname);
+	}
+
+	sendDataP2P(message);
+	sendToDisk(message);
+	sendToH2R(message);
+	sendToPost(message);
+	return true;
+}
+
+function sendToH2R(data){
+
+	if (settings.h2r && settings.h2rserver && settings.h2rserver.textsetting){
+		try {
+			var postServer = "http://127.0.0.1:4001/data/";
+
+			if (settings.h2rserver.textsetting.startsWith("http")){ // full URL provided
+				postServer = settings.h2rserver.textsetting;
+			} else if (settings.h2rserver.textsetting.startsWith("127.0.0.1")){ // missing the HTTP, so assume what they mean
+				postServer = "http://"+settings.h2rserver.textsetting;
+			} else {
+				postServer += settings.h2rserver.textsetting; // Just going to assume they gave the token
+			}
+
+			var msg = {};
+
+			if ("id" in data){
+				msg.id = data.id;
+			}
+
+			if (data.timestamp){
+				msg.timestamp = data.timestamp;
+			}
+
+			msg.snippet = {};
+			msg.snippet.displayMessage = data.chatmessage || "";
+
+			msg.authorDetails = {};
+			msg.authorDetails.displayName = data.chatname || "";
+
+
+
+			if (data.type && (data.type == "twitch") && data.chatname){
+				msg.authorDetails.profileImageUrl = "https://api.socialstream.ninja/twitch/large?username="+encodeURIComponent(data.chatname); // 150x150
+
+			} else if (data.type && (data.type == "youtube") && data.chatimg){
+				let chatimg = data.chatimg.replace("=s32-", "=s256-");
+				msg.authorDetails.profileImageUrl = chatimg.replace("=s64-", "=s256-");
+
+			} else {
+				msg.authorDetails.profileImageUrl = data.chatimg || "https://socialstream.ninja/unknown.png";
+			}
+
+
+			if (data.type){
+				msg.platform = {};
+				msg.platform.name = data.type || "";
+				msg.platform.logoUrl = "https://socialstream.ninja/"+data.type+".png";
+			}
+
+			var h2r = {};
+			h2r.messages = [];
+			h2r.messages.push(msg);
+			ajax(h2r, postServer, "POST");
+		} catch(e){
+			console.warn(e);
+		}
+	}
+}
+
+function sendToPost(data){
+
+	if (settings.post && settings.postserver && settings.postserver.textsetting){
+		try {
+			var postServer = "http://127.0.0.1:80";
+
+			if (settings.postserver.textsetting.startsWith("http")){ // full URL provided
+				postServer = settings.postserver.textsetting;
+			} else if (settings.postserver.textsetting.startsWith("127.0.0.1")){ // missing the HTTP, so assume what they mean
+				postServer = "http://"+settings.postserver.textsetting;
+			} else {
+				postServer += settings.postserver.textsetting; // Just going to assume they gave the token
+			}
+
+			if (data.type && !data.chatimg && (data.type == "twitch") && data.chatname){
+				data.chatimg = "https://api.socialstream.ninja/twitch/large?username="+encodeURIComponent(data.chatname); // 150x150
+
+			} else if (data.type && (data.type == "youtube") && data.chatimg){
+				let chatimg = data.chatimg.replace("=s32-", "=s256-");
+				data.chatimg = chatimg.replace("=s64-", "=s256-");
+
+			} else {
+				data.chatimg = data.chatimg || "https://socialstream.ninja/unknown.png";
+			}
+
+
+			if (data.type){
+				data.logo = "https://socialstream.ninja/"+data.type+".png";
+			}
+
+			ajax(data, postServer, "POST");
+		} catch(e){
+			console.warn(e);
+		}
+	}
+}
+var socketserverDock = false;
+var serverURLDock = "wss://api.overlay.ninja/dock";
+var conConDock = 0;
+
+function setupSocketDock(){
+
+	if (!settings.server2){return;}
+	else if (!isExtensionOn){return;}
+	else if (!socketserverDock){
+		socketserverDock = new WebSocket(serverURLDock);
+	}
+	
+	socketserverDock.onclose = function (){
+		if (settings.server2 && isExtensionOn){
+			setTimeout(function(){
+				if (settings.server2 && isExtensionOn){
+					conConDock+=1;
+					socketserverDock = new WebSocket(serverURLDock);
+					setupSocketDock();
+				} else {
+					socketserverDock = false;
+				}
+			},100*conConDock);
+		} else {
+			socketserverDock = false;
+		}
+	};
+	socketserverDock.onopen = function (){
+		conConDock = 0;
+		socketserverDock.send(JSON.stringify({"join":channel,"out":4,"in":3}));
+	};
+	socketserverDock.addEventListener('message', async function (event) {
+		if (event.data){
+			
+		}
+	})
+}
+//
+
+var socketserver = false;
+var serverURL = "wss://api.overlay.ninja/api";
+var conCon = 0;
+
+function setupSocket(){
+
+	if (!settings.socketserver){return;}
+	else if (!isExtensionOn){return;}
+	else if (!socketserver){
+		socketserver = new WebSocket(serverURL);
+	}
+	
+	socketserver.onclose = function (){
+		if (settings.socketserver && isExtensionOn){
+			setTimeout(function(){
+				if (settings.socketserver && isExtensionOn){
+					conCon+=1;
+					socketserver = new WebSocket(serverURL);
+					setupSocket();
+				} else {
+					socketserver = false;
+				}
+			},100*conCon);
+		} else {
+			socketserver = false;
+		}
+	};
+	socketserver.onopen = function (){
+		conCon = 0;
+		socketserver.send(JSON.stringify({"join":channel,"out":2,"in":1}));
+	};
+	socketserver.addEventListener('message', async function (event) {
+		if (event.data){
+
+			var data = JSON.parse(event.data);
+			var resp = false;
+			if (data.action && (data.action === "sendChat") && data.value){
+				var msg = {};
+				msg.response = data.value;
+				if (data.target){
+					msg.destination = data.target;
+				}
+				console.log(msg);
+				resp = processResponse(msg);
+			} else if (data.action && (data.action === "sendEncodedChat") && data.value){
+				var msg = {};
+				msg.response = decodeURIComponent(data.value);
+				if (data.target){
+					msg.destination = decodeURIComponent(data.target);
+				}
+				console.log(msg);
+				resp = processResponse(msg);
+			} else if (!data.action && data.extContent){ // Not flattened
+				try {
+					var msg = await applyBotActions(data.extContent); // perform any immediate (custom) actions, including modifying the message before sending it out
+					if (msg){
+						resp = sendToDestinations(msg);
+					}
+				} catch(e){
+					console.error(e);
+				}
+			} else if (data.action && (data.action === "extContent") && data.value){ // flattened
+				try {
+					let msg = JSON.parse(data.value);
+					msg = await applyBotActions(msg); // perform any immediate (custom) actions, including modifying the message before sending it out
+					if (msg){
+						resp = sendToDestinations(msg);
+					}
+				} catch(e){
+					console.error(e);
+				}
+			}
+
+			var ret = {};
+			if (typeof resp == "object"){
+				resp = true;
+			}
+			if (data.get){
+				var ret = {};
+				ret.callback = {};
+				ret.callback.get = data.get
+				ret.callback.result = true;
+				socketserver.send(JSON.stringify(ret));
+			}
+		}
+	});
+}
+
+function enableYouTube(){ // function to send data to the DOCk via the VDO.Ninja API
+	try {
+		iframe.contentWindow.postMessage({"enableYouTube":settings.youtubeapikey.textsetting}, '*'); // send only to 'viewers' of this stream
+	} catch(e){
+		console.error(e);
+	}
+}
+
+async function openchat(target=null){
+
+	var res;
+	var promise =  new Promise((resolve, reject) => {
+		res = resolve;
+	});
+
+
+	chrome.tabs.query({}, function(tabs) { // tabs[i].url
+		if (chrome.runtime.lastError) {
+			console.warn(chrome.runtime.lastError.message);
+		}
+		let urls = [];
+		tabs.forEach(tab=>{
+			if (tab.url){
+				urls.push(tab.url);
+			}
+		});
+		res(urls);
+	});
+
+	var activeurls = await promise;
+	console.log(activeurls);
+
+	function openURL(input, newWindow=false, poke=false){
+		var matched = false;
+		activeurls.forEach(url2=>{
+			if (url2.startsWith(input)){
+				matched = true;
+			}
+		});
+		if (!matched){
+			if (newWindow) {
+				var popup = window.open(input, '_blank', 'toolbar=0,location=0,menubar=0,fullscreen=1'); // fullscreen param is for IE 11
+				popup.moveTo(0, 0); // Reset position
+				popup.resizeTo(screen.availWidth, screen.availHeight); // Almost fullscreen window
+			} else {
+				window.open(input, '_blank');
+			}
+			if (poke){
+				setTimeout(function(){pokeSite(input);},3000,input);
+				setTimeout(function(){pokeSite(input);},6000,input);
+			}
+		}
+	}
+
+	if ((target=="twitch" || !target) && settings.twitch_username){
+		let url = "https://www.twitch.tv/popout/"+settings.twitch_username.textsetting+"/chat?popout=";
+		openURL(url);
+	}
+
+	if ((target=="kick" || !target) && settings.kick_username){
+		let url = "https://kick.com/"+settings.kick_username.textsetting+"/chatroom"
+		openURL(url);
+	}
+
+	if ((target=="instagramlive" || !target) && settings.instagramlive_username && settings.instagramlive_username.textsetting){
+		let url = "https://www.instagram.com/"+settings.instagramlive_username.textsetting+"/live/";
+		try {
+			fetch(url, { method: 'GET', redirect: 'error'}).then((response) => response.text()).then((data) => {
+				openURL(url, false, true);
+			}).catch(error => {
+				// not live?
+			});
+		} catch(e){
+			// not live
+		}
+	}
+
+	if ((target=="facebook" || !target) && settings.facebook_username){
+		let url = "https://www.facebook.com/"+settings.facebook_username.textsetting+"/live"
+		openURL(url);
+	}
+
+	if ((target=="discord" || !target) && settings.discord_serverid && settings.discord_channelid  && settings.discord_serverid.textsetting && settings.discord_channelid.textsetting){
+		openURL("https://discord.com/channels/"+settings.discord_serverid.textsetting+"/"+settings.discord_channelid.textsetting);
+	}
+
+	// Opened in new window
+
+	if ((target=="youtube" || !target) && settings.youtube_username){
+		if (!settings.youtube_username.textsetting.startsWith("@")){
+			settings.youtube_username.textsetting = "@"+settings.youtube_username.textsetting;
+		}
+		fetch("https://www.youtube.com/c/"+settings.youtube_username.textsetting+"/live").then((response) => response.text()).then((data) => {
+			try{
+				let videoID = data.split('{"videoId":"')[1].split('"')[0];
+				console.log(videoID);
+				let url = "https://www.youtube.com/live_chat?is_popout=1&v="+videoID;
+				openURL(url, true);
+			} catch(e){
+				// not live?
+			}
+		}).catch(error => {
+			// not live?
+		});
+	}
+
+	if ((target=="tiktok" || !target) && settings.tiktok_username){
+		if (!settings.tiktok_username.textsetting.startsWith("@")){
+			settings.tiktok_username.textsetting = "@"+settings.tiktok_username.textsetting;
+		}
+		let url = "https://www.tiktok.com/"+settings.tiktok_username.textsetting+"/live";
+		openURL(url, true);
+	}
+
+	if ((target=="trovo" || !target) && settings.trovo_username){
+		let url = "https://trovo.live/chat/"+settings.trovo_username.textsetting;
+		openURL(url, true);
+	}
+
+	if ((target=="picarto" || !target) && settings.picarto_username){
+		let url = "https://picarto.tv/chatpopout/"+settings.picarto_username.textsetting+"/public";
+		openURL(url, true);
+	}
+	
+	if ((target=="dlive" || !target) && settings.dlive_username){
+		let url = "https://dlive.tv/c/"+settings.dlive_username.textsetting+"/"+settings.dlive_username.textsetting;
+		openURL(url, true);
+	}
+	
+	// Custom
+
+	if ((target=="custom1" || !target) && settings.custom1_url){
+		let url = settings.custom1_url.textsetting;
+		if (!url.startsWith("http")){
+			url="https://"+url;
+		}
+		openURL(url, settings.custom1_url_newwindow);
+	}
+
+	if ((target=="custom2" || !target) && settings.custom2_url){
+		let url = settings.custom2_url.textsetting;
+		if (!url.startsWith("http")){
+			url="https://"+url;
+		}
+		openURL(url, settings.custom2_url_newwindow);
+	}
+
+	if ((target=="custom3" || !target) && settings.custom3_url){
+		let url = settings.custom3_url.textsetting;
+		if (!url.startsWith("http")){
+			url="https://"+url;
+		}
+		openURL(url, settings.custom3_url_newwindow);
+	}
+}
+
 function sendDataP2P(data){ // function to send data to the DOCk via the VDO.Ninja API
+	
+	if (settings.server2 && socketserverDock){
+		try{
+			socketserverDock.send(JSON.stringify(data));
+			return;
+		} catch(e){
+			console.error(e);
+			// lets try to send it via P2P as a backup option
+		}
+	}
+	
 	var msg = {};
-	msg.overlayNinja = {};
 	msg.overlayNinja = data;
+	
 	try {
 		iframe.contentWindow.postMessage({"sendData":msg, "type": "pcs"}, '*'); // send only to 'viewers' of this stream
 	} catch(e){}
 }
+
+function sendToDisk(data){
+	if (newFileHandle){
+		try {
+			if (typeof data == "object"){
+				data.timestamp = new Date().getTime();
+
+				if (data.type && data.chatimg && (data.type == "youtube")){
+					data.chatimg = data.chatimg.replace("=s32-", "=s512-");  // high, but meh.
+					data.chatimg = data.chatimg.replace("=s64-", "=s512-");
+				}
+
+				if (data.type && (data.type == "twitch") && data.chatname){
+					data.chatimg = "https://api.socialstream.ninja/twitch/large?username="+encodeURIComponent(data.chatname); // 150x150
+				}
+
+				overwriteFile(JSON.stringify(data));
+			}
+		} catch(e){}
+	}
+	if (newFileHandleExcel){
+		try {
+			if (typeof data == "object"){
+				data.timestamp = new Date().getTime();
+
+				if (data.type && data.chatimg && (data.type == "youtube")){
+					data.chatimg = data.chatimg.replace("=s32-", "=s256-");
+					data.chatimg = data.chatimg.replace("=s64-", "=s256-");
+				}
+
+				if (data.type && (data.type == "twitch") && data.chatname){
+					data.chatimg = "https://api.socialstream.ninja/twitch/large?username="+encodeURIComponent(data.chatname); // 150x150
+				}
+				overwriteFileExcel(data);
+			}
+		} catch(e){}
+	}
 	
-function loadIframe(channel){  // this is pretty important if you want to avoid camera permission popup problems.  You can also call it automatically via: <body onload=>loadIframe();"> , but don't call it before the page loads.
+	if (newSavedNamesFileHandle && data.chatname){
+		overwriteSavedNames(data.chatname);
+	}
+	
+}
+
+
+
+function loadIframe(channel, pass=false){  // this is pretty important if you want to avoid camera permission popup problems.  You can also call it automatically via: <body onload=>loadIframe();"> , but don't call it before the page loads.
 	iframe = document.createElement("iframe");
-	iframe.src = "https://vdo.socialstream.ninja/?password=false&room="+channel+"&push="+channel+"&vd=0&ad=0&autostart&cleanoutput&view"; // don't listen to any inbound events
+	if (!pass){
+		pass = "false";
+	}
+	iframe.src = "https://vdo.socialstream.ninja/alpha/?ln&salt=vdo.ninja&password="+pass+"&room="+channel+"&push="+channel+"&vd=0&ad=0&autostart&cleanoutput&view&label=SocialStream"; // don't listen to any inbound events
 	document.body.appendChild(iframe);
 }
 
@@ -412,74 +1342,295 @@ try{
 } catch(e){
 	console.log("'chrome.debugger' not supported by this browser");
 }
-function onAttach(debuggeeId, callback, message) { // for faking user input
+function onAttach(debuggeeId, callback, message, a=null,b=null,c=null) { // for faking user input
   if (chrome.runtime.lastError) {
     console.log(chrome.runtime.lastError.message);
     return;
   }
   debuggerEnabled[debuggeeId.tabId] = true;
-  callback(debuggeeId.tabId, message);
+  if (c!==null){
+	  callback(debuggeeId.tabId, message, a,b,c);
+  } else if (b!==null){
+	  callback(debuggeeId.tabId, message, a,b);
+  } else if (a!==null){
+	  callback(debuggeeId.tabId, message, a);
+  } else {
+	  callback(debuggeeId.tabId, message);
+  }
 }
 
-eventer(messageEvent, function (e) {
-  if ("dataReceived" in e.data){ // raw data 
-	if ("overlayNinja" in e.data.dataReceived){
-		if ("response" in e.data.dataReceived.overlayNinja){ // we receieved a response from the dock
-			processResponse(e.data.dataReceived.overlayNinja);
+eventer(messageEvent, async function (e) {
+	if (e.source != iframe.contentWindow){return}
+	if (e.data && (typeof e.data == "object")){
+		if (("dataReceived" in e.data) && ("overlayNinja" in e.data.dataReceived)){
+			if ("response" in e.data.dataReceived.overlayNinja){ // we receieved a response from the dock
+				processResponse(e.data.dataReceived.overlayNinja);
+			} else if ("action" in e.data.dataReceived.overlayNinja){
+				if (e.data.dataReceived.overlayNinja.action === "openChat"){
+					openchat(e.data.dataReceived.overlayNinja.value || null);
+				}
+			}
+		} else if ("action" in e.data){ // this is from vdo.ninja, not socialstream.
+			if (e.data.action === "YoutubeChat"){
+				if (e.data.value && data.value.snippet && data.value.authorDetails){
+					var data = {};
+					data.chatname = e.data.value.authorDetails.displayName || "";
+					data.chatimg = e.data.value.authorDetails.profileImageUrl || "";
+
+					data.nameColor = "";
+					data.chatbadges = "";
+					data.backgroundColor = "";
+					data.textColor = "";
+
+					data.chatmessage = data.value.snippet.displayMessage || "";
+
+					data.hasDonation = "";
+					data.hasMembership = "";
+
+					data.type = "youtube";
+
+					console.log(data);
+					data = await applyBotActions(data); // perform any immediate (custom) actions, including modifying the message before sending it out
+					sendToDestinations(data);
+				} else {
+					console.log(e.data);
+				}
+			}
 		}
 	}
-  }
 });
 
-function processResponse(data){
-	
-	if (!chrome.debugger){return;}
-	if (!isExtensionOn){return;} // extension not active, so don't let responder happen. Probably safer this way.
-	
+function checkIfAllowed(sitename){
+	if (!settings.discord){
+		try {
+			if (sitename == "discord"){
+				return false;
+			}
+			if (sitename.startsWith("https://discord.com/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	if (!settings.slack){
+		try {
+			if (sitename == "slack"){
+				return false;
+			}
+			if (sitename.startsWith("https://app.slack.com/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	if (!settings.chime){
+		try {
+			if (sitename == "chime"){
+				return false;
+			}
+			if (sitename.startsWith("https://app.chime.aws/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	if (!settings.meet){
+		try {
+			if (sitename == "meet"){
+				return false;
+			}
+			if (sitename.startsWith("https://meet.google.com/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	if (!settings.telegram){
+		try {
+			if (sitename == "telegram"){
+				return false;
+			}
+			if (sitename.includes(".telegram.org/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	if (!settings.whatsapp){
+		try {
+			if (sitename == "whatsapp"){
+				return false;
+			}
+			if (sitename.startsWith("https://web.whatsapp.com/")){
+				return false;
+			}
+		} catch(e){}
+	}
+
+	if (!settings.instagram){
+		try {
+			if (sitename == "instagram"){ // "instagram live" is allowed still, just not comments
+				return false;
+			}
+			if (sitename.startsWith("https://www.instagram.com/")){
+				return false;
+			}
+		} catch(e){}
+	}
+	return true;
+}
+
+function pokeSite(url){
+	if (!chrome.debugger){return false;}
+	if (!isExtensionOn){return false;} // extension not active, so don't let responder happen. Probably safer this way.
+
 	chrome.tabs.query({}, function(tabs) {
-		chrome.runtime.lastError;
+		if (chrome.runtime.lastError) {
+			console.warn(chrome.runtime.lastError.message);
+		}
+		var published = {};
+		for (var i=0;i<tabs.length;i++){
+			try {
+
+				if (!tabs[i].url){continue;}
+				if (tabs[i].url in published){continue;} // skip. we already published to this tab.
+				if (tabs[i].url.startsWith("https://socialstream.ninja/")){continue;}
+				if (tabs[i].url.startsWith("chrome-extension")){continue;}
+				// if (!checkIfAllowed((tabs[i].url))){continue;}
+
+				published[tabs[i].url] = true;
+				//messageTimeout = Date.now();
+				// console.log(tabs[i].url);
+				if (tabs[i].url.startsWith(url)){
+					if (!debuggerEnabled[tabs[i].id]){
+						debuggerEnabled[tabs[i].id]=false;
+						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakePoke));  // enable the debugger to let us fake a user
+					} else {
+						generalFakePoke(tabs[i].id);
+					}
+				}
+			} catch(e){
+				chrome.runtime.lastError;
+			}
+		}
+	});
+	return true;
+}
+
+function generalFakePoke(tabid){ // fake a user input
+	try{
+		chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+			"type": "keyDown",
+			"key": "Enter",
+			"code": "Enter",
+			"nativeVirtualKeyCode": 13,
+			"windowsVirtualKeyCode": 13
+		}, function (e) {
+			chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+				"type": "keyUp",
+				"key": "Enter",
+				"code": "Enter",
+				"nativeVirtualKeyCode": 13,
+				"windowsVirtualKeyCode": 13
+			 }, function (e) {
+					chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchMouseEvent", {
+						"type": "mousePressed",
+						"x": 1,
+						"y": 1,
+						"button": "left",
+						"clickCount": 1
+					}, function (e) {
+						chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchMouseEvent", {
+							"type": "mouseReleased",
+							"x": 1,
+							"y": 1,
+							"button": "left",
+							"clickCount": 1
+						}, function (e) {
+							if (debuggerEnabled[tabid]){
+								chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+							}
+						});
+					});
+				}
+			);
+		});
+
+	} catch(e){
+		if (debuggerEnabled[tabid]){
+			chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+		}
+	}
+}
+
+function processResponse(data){
+
+	if (!chrome.debugger){return false;}
+	if (!isExtensionOn){return false;} // extension not active, so don't let responder happen. Probably safer this way.
+
+	chrome.tabs.query({}, function(tabs) {
+		if (chrome.runtime.lastError) {
+			console.warn(chrome.runtime.lastError.message);
+		}
 		var published = {};
 		for (var i=0;i<tabs.length;i++){
 			try {
 				if (("tid" in data) && (data.tid!==false)){ // if an action-response, we want to only respond to the tab that originated it
-					if ( data.tid !== tabs[i].id){continue;} 
+					if ( data.tid !== tabs[i].id){continue;}
 				}
-				if (!tabs[i].url){continue;} 
+				if (!tabs[i].url){continue;}
 				if (tabs[i].url in published){continue;} // skip. we already published to this tab.
-				published[tabs[i].url] = true;
-				messageTimeout = Date.now();
+				if (tabs[i].url.startsWith("https://socialstream.ninja/")){continue;}
+				if (tabs[i].url.startsWith("chrome-extension")){continue;}
+				if (!checkIfAllowed((tabs[i].url))){continue;}
 				
+				if (data.destination && !tabs[i].url.includes(data.destination)){continue;}
+
+				published[tabs[i].url] = true;
+				//messageTimeout = Date.now();
+
 				if (tabs[i].url.startsWith("https://www.twitch.tv/popout/")){  // twitch, but there's also cases for youtube/facebook
-					
+
 					if (!debuggerEnabled[tabs[i].id]){
 						debuggerEnabled[tabs[i].id]=false;
-						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, false));  // enable the debugger to let us fake a user 
+						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, false, true, false));  // enable the debugger to let us fake a user
 					} else {
-						generalFakeChat(tabs[i].id, data.response, false);
+						generalFakeChat(tabs[i].id, data.response, false, true, false);
+					}
+				} else if (tabs[i].url.startsWith("https://app.chime.aws/meetings/")){  // twitch, but there's also cases for youtube/facebook
+					if (!debuggerEnabled[tabs[i].id]){
+						debuggerEnabled[tabs[i].id]=false;
+						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, false, true, true));  // enable the debugger to let us fake a user
+					} else {
+						generalFakeChat(tabs[i].id, data.response, false, true, true); // middle=true, keypress=true, backspace=false
+					}
+				} else if (tabs[i].url.startsWith("https://app.slack.com")){  // twitch, but there's also cases for youtube/facebook
+					if (!debuggerEnabled[tabs[i].id]){
+						debuggerEnabled[tabs[i].id]=false;
+						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, false, true, true));  // enable the debugger to let us fake a user
+					} else {
+						generalFakeChat(tabs[i].id, data.response, false, false, false); // middle=true, keypress=true, backspace=false
 					}
 				} else {  // all other destinations. ; generic
-				
+
 					if (tabs[i].url.includes("youtube.com/live_chat")){
 						getYoutubeAvatarImage(tabs[i].url, true); // see if I can pre-cache the channel image, if not loaded.
 					}
-				
+
 					if (!debuggerEnabled[tabs[i].id]){
 						debuggerEnabled[tabs[i].id]=false;
-						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, true));  // enable the debugger to let us fake a user 
+						chrome.debugger.attach( { tabId: tabs[i].id },  "1.3", onAttach.bind(null,  { tabId: tabs[i].id }, generalFakeChat, data.response, true, true, false));  // enable the debugger to let us fake a user
 					} else {
-						generalFakeChat(tabs[i].id, data.response, true);
+						generalFakeChat(tabs[i].id, data.response, true, true, false);
 					}
-					
-				} 
+
+				}
 			} catch(e){
 				chrome.runtime.lastError;
 				console.log(e);
 			}
 		}
 	});
+	return true;
 }
-	
-function generalFakeChat(tabid, message, middle=true){ // fake a user input
+
+
+function generalFakeChat(tabid, message, middle=true, keypress=true, backspace=false){ // fake a user input
 	try{
 		chrome.tabs.sendMessage(tabid, "focusChat", function(response=false) {
 			chrome.runtime.lastError;
@@ -489,58 +1640,220 @@ function generalFakeChat(tabid, message, middle=true){ // fake a user input
 				}
 				return;
 			}; // make sure the response is valid, else don't inject text
-			
+
 			lastSentMessage = message.replace(/<\/?[^>]+(>|$)/g, ""); // keep a cleaned copy
 			lastSentMessage = lastSentMessage.replace(/\s\s+/g, ' ');
 			lastSentTimestamp = Date.now();
 			lastMessageCounter = 0;
-			chrome.debugger.sendCommand({ tabId:tabid }, "Input.insertText", { text: message }, function (e) {});
-			
-			chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", { 
-				"type": "keyDown",
-				"key": "Enter",
-				"code": "Enter",
-				"nativeVirtualKeyCode": 13,
-				"windowsVirtualKeyCode": 13
-			}, function (e) {});
-			
-			if (middle){
+
+			if (backspace){
 				chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
-					"type": "char",
-					"key": "Enter",
-					"text": "\r",
-					"code": "Enter",
-					"nativeVirtualKeyCode": 13,
-					"windowsVirtualKeyCode": 13
-				}, function (e) {
-				});
-			}
-			
-			chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
-				"type": "keyUp",
-				"key": "Enter",
-				"code": "Enter",
-				"nativeVirtualKeyCode": 13,
-				"windowsVirtualKeyCode": 13
-			 }, function (e) {
-					if (debuggerEnabled[tabid]){
-						chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
-					}
+				   "key": "Backspace",
+				   "modifiers": 0,
+				   "nativeVirtualKeyCode": 8,
+				   "text": "",
+				   "type": "rawKeyDown",
+				   "unmodifiedText": "",
+				   "windowsVirtualKeyCode": 8
+				 }, function (e) {
+
+						chrome.debugger.sendCommand({ tabId:tabid }, "Input.insertText", { text: message }, function (e) {});
+
+						if (keypress){
+							chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+								"type": "keyDown",
+								"key": "Enter",
+								"code": "Enter",
+								"nativeVirtualKeyCode": 13,
+								"windowsVirtualKeyCode": 13
+							}, function (e) {});
+						}
+
+						if (middle){
+							chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+								"type": "char",
+								"key": "Enter",
+								"text": "\r",
+								"code": "Enter",
+								"nativeVirtualKeyCode": 13,
+								"windowsVirtualKeyCode": 13
+							}, function (e) {
+								if (!keypress){
+									if (debuggerEnabled[tabid]){
+										chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+									}
+								}
+							});
+						}
+
+						if (keypress){
+							chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+								"type": "keyUp",
+								"key": "Enter",
+								"code": "Enter",
+								"nativeVirtualKeyCode": 13,
+								"windowsVirtualKeyCode": 13
+							 }, function (e) {
+									if (debuggerEnabled[tabid]){
+										chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+									}
+								}
+							);
+						}
+
+				 }	);
+			} else {
+
+				chrome.debugger.sendCommand({ tabId:tabid }, "Input.insertText", { text: message }, function (e) {});
+
+				if (keypress){
+					chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+						"type": "keyDown",
+						"key": "Enter",
+						"code": "Enter",
+						"nativeVirtualKeyCode": 13,
+						"windowsVirtualKeyCode": 13
+					}, function (e) {});
 				}
-			);
-			
+
+				if (middle){
+					chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+						"type": "char",
+						"key": "Enter",
+						"text": "\r",
+						"code": "Enter",
+						"nativeVirtualKeyCode": 13,
+						"windowsVirtualKeyCode": 13
+					}, function (e) {
+						if (!keypress){
+							if (debuggerEnabled[tabid]){
+								chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+							}
+						}
+					});
+				}
+
+				if (keypress){
+					chrome.debugger.sendCommand({ tabId:tabid }, "Input.dispatchKeyEvent", {
+						"type": "keyUp",
+						"key": "Enter",
+						"code": "Enter",
+						"nativeVirtualKeyCode": 13,
+						"windowsVirtualKeyCode": 13
+					 }, function (e) {
+							if (debuggerEnabled[tabid]){
+								chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
+							}
+						}
+					);
+				}
+			}
+
 		});
-		
+
 	} catch(e){
-		console.log(e);
 		if (debuggerEnabled[tabid]){
 			chrome.debugger.detach({ tabId: tabid }, onDetach.bind(null, { tabId: tabid }));
 		}
 	}
 }
 
+function createTab(url) {
+    return new Promise(resolve => {
+        chrome.windows.create({focused:false,height:200,width:400,left:0, top:0,type:"popup",url:url}, async tab => {
+            chrome.tabs.onUpdated.addListener(function listener (tabId, info) {
+                if (info.status === 'complete' && tabId === tab.id) {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve(tab);
+                }
+            });
+        });
+    });
+}
+
+/////////////// bad word filter
+// just to keep things PG, I encode the naughty list.
+const badWords = JSON.parse(atob('WyJmdWNrIiwic2hpdCIsImN1bnQiLCJiaXRjaCIsIm5pZ2dlciIsImZhZyIsInJldGFyZCIsInJhcGUiLCJwdXNzeSIsImNvY2siLCJhc3Nob2xlIiwid2hvcmUiLCJzbHV0IiwiZ2F5IiwibGVzYmlhbiIsInRyYW5zZ2VuZGVyIiwidHJhbnNzZXh1YWwiLCJ0cmFubnkiLCJjaGluayIsInNwaWMiLCJraWtlIiwiamFwIiwid29wIiwicmVkbmVjayIsImhpbGxiaWxseSIsIndoaXRlIHRyYXNoIiwiZG91Y2hlIiwiZGljayIsImJhc3RhcmQiLCJmdWNrZXIiLCJtb3RoZXJmdWNrZXIiLCJhc3MiLCJhbnVzIiwidmFnaW5hIiwicGVuaXMiLCJ0ZXN0aWNsZXMiLCJtYXN0dXJiYXRlIiwib3JnYXNtIiwiZWphY3VsYXRlIiwiY2xpdG9yaXMiLCJwdWJpYyIsImdlbml0YWwiLCJlcmVjdCIsImVyb3RpYyIsInBvcm4iLCJ4eHgiLCJkaWxkbyIsImJ1dHQgcGx1ZyIsImFuYWwiLCJzb2RvbXkiLCJwZWRvcGhpbGUiLCJiZXN0aWFsaXR5IiwibmVjcm9waGlsaWEiLCJpbmNlc3QiLCJzdWljaWRlIiwibXVyZGVyIiwidGVycm9yaXNtIiwiZHJ1Z3MiLCJhbGNvaG9sIiwic21va2luZyIsIndlZWQiLCJtZXRoIiwiY3JhY2siLCJoZXJvaW4iLCJjb2NhaW5lIiwib3BpYXRlIiwib3BpdW0iLCJiZW56b2RpYXplcGluZSIsInhhbmF4IiwiYWRkZXJhbGwiLCJyaXRhbGluIiwic3Rlcm9pZHMiLCJ2aWFncmEiLCJjaWFsaXMiLCJwcm9zdGl0dXRpb24iLCJlc2NvcnQiXQ=='));
+const alternativeChars = {
+  'a': ['@', '4'],
+  'e': ['3'],
+  'i': ['1', '!'],
+  'o': ['0'],
+  's': ['$', '5'],
+  't': ['7'],
+  'c': ['<']
+};
+function generateVariations(word) {
+  const variations = [word];
+  for (let i = 0; i < word.length; i++) {
+    const char = word[i].toLowerCase();
+    if (alternativeChars.hasOwnProperty(char)) {
+      const charVariations = alternativeChars[char];
+      const newVariations = [];
+      for (const variation of variations) {
+        for (const altChar of charVariations) {
+          const newWord = variation.slice(0, i) + altChar + variation.slice(i + 1);
+          newVariations.push(newWord);
+        }
+      }
+      variations.push(...newVariations);
+    }
+  }
+  return variations;
+}
+function generateVariationsList(words) {
+  const variationsList = [];
+  for (const word of words) {
+    variationsList.push(...generateVariations(word));
+  }
+  return variationsList.filter(word => !word.match(/[A-Z]/));
+}
+const badWordsExanded = generateVariationsList(badWords)
+function createProfanityHashTable(profanityVariationsList) {
+  const hashTable = {};
+  for (let i = 0; i < profanityVariationsList.length; i++) {
+    const word = profanityVariationsList[i].toLowerCase();
+    for (let j = 0; j < word.length; j++) {
+      const character = word[j];
+      if (!hashTable[character]) {
+        hashTable[character] = {};
+      }
+      hashTable[character][word] = true;
+    }
+  }
+  return hashTable;
+}
+const profanityHashTable = createProfanityHashTable(badWordsExanded);;
+function isProfanity(word) {
+  const wordLower = word.toLowerCase();
+  const firstChar = wordLower[0];
+  const words = profanityHashTable[firstChar];
+  if (!words) {
+    return false;
+  }
+  return Boolean(words[wordLower]);
+}
+function filterProfanity(sentence) {
+  let words = sentence.toLowerCase().split(/[\s\.\-_!?,]+/);
+  const uniqueWords = new Set(words);
+  for (let word of uniqueWords) {
+	if (isProfanity(word)){
+		sentence = sentence.replace(new RegExp('\\b' + word + '\\b', 'gi'), '*'.repeat(word.length));
+	}
+  }
+  return sentence;
+}
+/////// end of bad word filter
+
 async function applyBotActions(data){ // this can be customized to create bot-like auto-responses/actions.
 	// data.tid,, => processResponse({tid:N, response:xx})
+
+	if (settings.blacklist && data.chatmessage){
+		try {
+			data.chatmessage = filterProfanity(data.chatmessage);
+		} catch(e){console.error(e);}
+	}
+	
 	if (settings.autohi){
 		if (data.chatmessage.toLowerCase() === "hi"){
 			if (Date.now() - messageTimeout > 60000){ // respond to "1" with a "1" automatically; at most 1 time per minute.
@@ -552,23 +1865,24 @@ async function applyBotActions(data){ // this can be customized to create bot-li
 			}
 		}
 	}
-	
+
 	if (settings.joke && (data.chatmessage.toLowerCase() === "!joke")){
 		if (Date.now() - messageTimeout > 5100){
 			var score = parseInt(Math.random()* 378);
 			var joke = jokes[score];
-			
+
 			messageTimeout = Date.now();
-			data.response = "@"+data.chatname+", "+joke["setup"];
-			processResponse(data);
+			var msg = {};
+			msg.response = "@"+data.chatname+", "+joke["setup"];
+			processResponse(msg);
 			setTimeout(function(msg, punch){
 				msg.response = punch;
 				processResponse(msg);
-				
+
 			},5000, data, "@"+data.chatname+".. "+joke["punchline"]);
 		}
 	}
-	
+
 	if (settings.sentiment){
 		try {
 			if (!sentimentAnalysisLoaded){
@@ -578,30 +1892,53 @@ async function applyBotActions(data){ // this can be customized to create bot-li
 				data.sentiment = inferSentiment(data.chatmessage);
 			}
 		}catch(e){}
-	} 
-	
+	}
+
 	if (settings.comment_background){
 		if (!data.backgroundColor){
-			data.backgroundColor = "background-color:"+settings.comment_background+";";
+			data.backgroundColor = "background-color:"+settings.comment_background.value+";";
 		}
 	}
 	if (settings.comment_color){
 		if (!data.textColor){
-			data.textColor = "color:"+settings.comment_color+";";
+			data.textColor = "color:"+settings.comment_color.value+";";
 		}
 	}
 	if (settings.name_background){
 		if (!data.backgroundNameColor){
-			data.backgroundNameColor =  "background-color:"+settings.name_background+";";
+			data.backgroundNameColor =  "background-color:"+settings.name_background.value+";";
 		}
 	}
-	if (settings.name_color){ // 
+	if (settings.name_color){
 		if (!data.textNameColor){
-			data.textNameColor =  "color:"+settings.name_color+";";
+			data.textNameColor =  "color:"+settings.name_color.value+";";
+		}
+	}
+
+	// webhook for configured custom chat commands
+	for (var i = 1;i<=20;i++){
+		if (data.chatmessage && settings["chatevent"+i] && settings["chatcommand"+i] && settings["chatwebhook"+i]){
+			if (data.chatmessage === settings["chatcommand"+i].textsetting){
+				if (Date.now() - messageTimeout > 1000){
+					messageTimeout = Date.now();
+					let URL = settings["chatwebhook"+i].textsetting;
+					if (!URL.startsWith("http")){
+						if (!URL.includes("://")){
+							URL = "https://"+URL;
+							fetch(URL).catch(console.error);
+						} else {
+							window.open(URL, '_blank');
+						}
+					} else {
+						fetch(URL).catch(console.error);
+					}
+				}
+		   }
 		}
 	}
 	return data;
 }
+var store = [];
 
 var MidiInit = false;
 
@@ -612,7 +1949,7 @@ try {
 			MidiInput.addListener('controlchange', function(e) {
 				midiHotkeysCommand(e.controller.number, e.rawValue);
 			});
-			
+
 			MidiInput.addListener('noteon', function(e) {
 				var note = e.note.name + e.note.octave;
 				var velocity = e.velocity || false;
@@ -621,13 +1958,13 @@ try {
 		} else {
 			for (var i = 0; i < WebMidi.inputs.length; i++) {
 				MidiInput = WebMidi.inputs[i];
-				
+
 				MidiInput.addListener('controlchange', function(e) {
 					if (settings.midi && isExtensionOn){
 						midiHotkeysCommand(e.controller.number, e.rawValue);
 					}
 				});
-				
+
 				MidiInput.addListener('noteon', function(e) {
 					if (settings.midi && isExtensionOn){
 						var note = e.note.name + e.note.octave;
@@ -638,13 +1975,13 @@ try {
 			}
 		}
 	}
-	
+
 	function toggleMidi(){
 		if (!("midi" in settings)){return;}
 		if (settings.midi){
 			if (MidiInit===false){
 				MidiInit=true;
-				
+
 				WebMidi.enable().then(() =>{
 					setupMIDI();
 					WebMidi.addListener("connected", function(e) {
@@ -664,21 +2001,26 @@ try {
 			} catch(e){}
 		}
 	}
-	
+
 } catch(e){console.log(e);}
 
 
 function midiHotkeysCommand(number, value){ // MIDI control change commands
 	if (number == 102 && value == 1){
-		respond1ToAll();
+		respondToAll("1");
 	} else if (number == 102 && value == 2){
-		respondLULToAll();
+		respondToAll("LUL");
 	} else if (number == 102 && value == 3){
 		tellAJoke();
 	} else if (number == 102 && value == 4){
 		var msg = {};
-		msg.forward = false;
+		msg.forward = false; // clears our featured chat overlay
 		sendDataP2P(msg);
+	} else if (number == 102){
+		if (settings.midiConfig && ((value+"") in settings.midiConfig)){
+			var msg = settings.midiConfig[value+""];
+			respondToAll(msg);
+		}
 	}
 }
 
@@ -695,19 +2037,13 @@ function tellAJoke(){
 	processResponse(data);
 }
 
-function respond1ToAll(){
+function respondToAll(msg){
 	messageTimeout = Date.now();
 	var data = {};
-	data.response = "1";
+	data.response = msg
 	processResponse(data);
 }
 
-function respondLULToAll(){
-	messageTimeout = Date.now();
-	var data = {};
-	data.response = "LUL";
-	processResponse(data);
-}
 
 var jokes = [ // jokes from reddit; sourced from github.
   {

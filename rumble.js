@@ -18,11 +18,13 @@
 		
 		var chatimg = "";
 		if (ele.querySelector('.chat--profile-pic')){
-		  chatimg = document.querySelector('.chat--profile-pic').style.backgroundImage.split('"')[1];
+			try {
+				//chatimg = ele.querySelector('.chat--profile-pic').style.backgroundImage.split('"')[1];
+				//chatimg = chatimg.split('"')[0];
+			} catch(e){}
 		}
 		
 		var name="";
-		console.log(ele);
 		if (ele.querySelector('.chat-history--username')){
 		  name = ele.querySelector('.chat-history--username').innerText;
 		  if (name){
@@ -38,7 +40,7 @@
 		var msg = "";
 		
 		if (ele.querySelector('.chat-history--message')){
-			if (textOnlyMode){
+			if (settings.textonlymode){
 				try {
 					msg = ele.querySelector('.chat-history--message').innerText;
 				} catch(e){}
@@ -48,7 +50,7 @@
 				} catch(e){}
 			}
 		} else if (ele.querySelector('.chat-history--rant-text')){
-			if (textOnlyMode){
+			if (settings.textonlymode){
 				try {
 					msg = ele.querySelector('.chat-history--rant-text').innerText;
 				} catch(e){}
@@ -67,6 +69,18 @@
 		if (msg){
 			msg = msg.trim();
 		}
+		
+		var brandedImg = document.querySelector(".media-by-wrap .user-image");
+		if (brandedImg){
+			try {
+				brandedImg = getComputedStyle(document.querySelector(".media-by-wrap .user-image")).backgroundImage
+				brandedImg = "https://"+brandedImg.split("https://")[1];
+				brandedImg = brandedImg.split('")')[0];
+			} catch(e){
+				console.error(e);
+				brandedImg = "";
+			}
+		}
 
 		var data = {};
 		data.chatname = name;
@@ -80,13 +94,28 @@
 		data.contentimg = "";
 		data.type = "rumble";
 		
-		if (data.chatimg){
-			toDataURL(data.chatimg, function(dataUrl) {
-				data.chatimg = dataUrl;
-				pushMessage(data);
+		if (brandedImg){
+			data.sourceImg = brandedImg;
+			toDataURL(data.sourceImg, function(dataUrl) {
+				data.sourceImg = dataUrl;
+				if (data.chatimg){
+					toDataURL(data.chatimg, function(dataUrl) {
+						data.chatimg = dataUrl;
+						pushMessage(data);
+					});
+				} else {
+					pushMessage(data);
+				}
 			});
 		} else {
-			pushMessage(data);
+			if (data.chatimg){
+				toDataURL(data.chatimg, function(dataUrl) {
+					data.chatimg = dataUrl;
+					pushMessage(data);
+				});
+			} else {
+				pushMessage(data);
+			}
 		}
 	}
 
@@ -97,12 +126,14 @@
 		}
 	}
 	
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 
@@ -114,14 +145,12 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){}
 			sendResponse(false);
@@ -136,6 +165,7 @@
 						try {
 							if (mutation.addedNodes[i].skip){return;}
 							mutation.addedNodes[i].skip = true;
+							if (mutation.addedNodes[i] && mutation.addedNodes[i].className && mutation.addedNodes[i].className.includes("chat-history--rant-sticky")){return;}
 							processMessage(mutation.addedNodes[i]);
 						} catch(e){}
 					}

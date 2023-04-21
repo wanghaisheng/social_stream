@@ -1,8 +1,12 @@
 (function () {
-	function pushMessage(data){	  
+	function pushMessage(data){
 		try {
 			chrome.runtime.sendMessage(chrome.runtime.id, { "message": data }, function(e){});
 		} catch(e){}
+	}
+	
+	function sleep(ms = 0) {
+		return new Promise(r => setTimeout(r, ms)); // LOLz!
 	}
 
 	function toDataURL2(blobUrl, callback) {
@@ -29,35 +33,26 @@
 		//console.error(e);
 	}
 
-	function processMessage(ele){
-		
-		var chatimg="";
-		try{
-			chatimg = document.querySelector(".ChatInfo>.Avatar>img.avatar-media").src;
-			if (!chatimg){
-				chatimg = "";
-			} 
-		} catch(e){errorlog(e);}
-		
-		try{
-			if (!chatimg){
-				chatimg = document.querySelector("#MiddleColumn").querySelector("div.Avatar>img");
-			}
-			if (!chatimg){
-				chatimg = "";
-			} 
-		} catch(e){errorlog(e);}
+	function processMessage(ele, chatimg, chatname){
 		
 		
-		var chatname = "";
 		var chatmessage = "";
 		var contentimg = "";
+		
 		try{
-			chatname = document.querySelector(".ChatInfo>.info>.title").innerText;
+			ele.querySelector(".text-content").childNodes.forEach(ce=>{
+				if (ce.className && ce.className.includes("Reactions")){
+					return
+				} else if (ce.nodeName == "IMG"){
+					chatmessage+= "<img src='"+ce.src+"'/>";
+				} else if (ce.className && ce.className.includes("MessageMeta")){
+					// skip; this is date and stuff.
+				} else {
+					chatmessage += ce.textContent;
+				}
+			});
 		} catch(e){errorlog(e);}
-		try{
-			chatmessage = ele.querySelector(".content-inner").innerText;
-		} catch(e){errorlog(e);}
+		
 		try{
 			contentimg = ele.querySelector(".media-inner").querySelector("img").src;
 			if (!contentimg){
@@ -79,58 +74,110 @@
 		
 		if (!chatmessage && !contentimg){return;}
 		
-		if (data.contentimg && !data.contentimg.startsWith("https://")){ // data.contentimg
-			toDataURL2(data.contentimg, function(dataUrl) {
-				data.contentimg = dataUrl;
-				if (data.chatimg && !data.chatimg.startsWith("https://")){
-					toDataURL2(data.chatimg, function(dataUrl) {
-						data.chatimg = dataUrl;
-						pushMessage(data);
+		try {
+			if (data.contentimg && !data.contentimg.startsWith("https://")){ // data.contentimg
+				toDataURL2(data.contentimg, function(dataUrl) {
+					data.contentimg = dataUrl;
+					if (data.chatimg && !data.chatimg.startsWith("https://")){
+						toDataURL2(data.chatimg, function(dataUrl) {
+							data.chatimg = dataUrl;
+							pushMessage(data);
+							return;
+						});
 						return;
-					});
-					return;
-				} else {
+					}
 					pushMessage(data);
 					return;
-				}
+				});
 				return;
-			});
-			return;
-		} else {
-			pushMessage(data);
-			return;
-		}
-	  
-		if (data.chatimg && !data.chatimg.startsWith("https://")){
-			toDataURL2(data.chatimg, function(dataUrl) {
-				data.chatimg = dataUrl;
-				pushMessage(data);
+			} else if (data.chatimg && !data.chatimg.startsWith("https://")){
+				toDataURL2(data.chatimg, function(dataUrl) {
+					data.chatimg = dataUrl;
+					pushMessage(data);
+					return;
+				});
 				return;
-			});
-			return;
-		} else {
+			}
 			pushMessage(data);
-			return;
+		} catch(e){
 		}
-		return;
 	}
 	
+	var lastMessageID = 0;
+	var lastURL =  "";
 	
-	setInterval(function(){
-		var xxx = document.querySelectorAll('div.message-list-item');
-		for (var j = 0; j< xxx.length; j++){
-			if (xxx[j].marked){continue;}
-			xxx[j].marked = true;
-			processMessage(xxx[j]);
+	setInterval(async function(){
+		var highestMessage = 0;
+		var newChannel = false;
+		if (lastURL !== window.location.href){
+			lastURL = window.location.href;
+			lastMessageID = 0;
+			newChannel = true;
+		} 
+		
+		var chatimg="";
+		try{
+			chatimg = document.querySelector(".ChatInfo>.Avatar>img.avatar-media").src;
+			if (!chatimg){
+				chatimg = "";
+			} 
+		} catch(e){errorlog(e);}
+		
+		try{
+			if (!chatimg){
+				chatimg = document.querySelector("#MiddleColumn").querySelector("div.Avatar>img");
+			}
+			if (!chatimg){
+				chatimg = "";
+			} 
+		} catch(e){errorlog(e);}
+		
+		
+		var chatname = "";
+		try{
+			chatname = document.querySelector(".ChatInfo>.info>.title").innerText;
+		} catch(e){errorlog(e);}
+		
+		
+		try {
+			var xxx = document.querySelectorAll('div.message-list-item'); // messages-container
+			for (var j = 0; j< xxx.length; j++){
+				if (parseInt(xxx[j].dataset.messageId) && (parseInt(xxx[j].dataset.messageId)>=1) && (parseInt(xxx[j].dataset.messageId)< 1658053682710)){
+					if (lastMessageID<parseInt(xxx[j].dataset.messageId)){
+						highestMessage = parseInt(xxx[j].dataset.messageId);
+					} else {
+						continue;
+					}
+				}
+				if (xxx[j].marked){
+					continue;
+				}
+				xxx[j].marked = true;
+				if (!newChannel){
+					var posibleName = chatname;
+					if (settings.myname && settings.myname.value){
+						posibleName = settings.myname.value.split(",")[0];
+					}
+					processMessage(xxx[j],chatimg, posibleName);
+					await sleep(10);
+				} 
+			}
+			if (highestMessage>lastMessageID){
+				lastMessageID = highestMessage;
+			}
+		} catch(e){
+			 errorlog(e)
 		}
-	},3000);
+	},1000);
 
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 
@@ -146,14 +193,12 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){	}
 			

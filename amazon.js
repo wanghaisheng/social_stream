@@ -13,6 +13,8 @@
 	  xhr.responseType = 'blob';
 	  xhr.send();
 	}
+	
+	var imagenamelookup = {};
 
 	function processMessage(ele){
 
@@ -30,9 +32,7 @@
 		} catch(e){ }
 	  }
 	  
-	  if (chatimg){
-		  chatimg = chatimg.split("?")[0] + "?max_width=256&square=true";
-	  }
+	  
 	  var name = "";
 	  
 	  try{
@@ -46,6 +46,13 @@
 				 name = document.querySelector(".nav-shortened-name").innerText;
 			  }
 		  } catch(e){}
+	  }
+	  
+	  if (name && chatimg){
+			chatimg = chatimg.split("?")[0] + "?max_width=256&square=true";
+			imagenamelookup[name] = chatimg;
+	  } else if (name && imagenamelookup[name]){
+			chatimg = imagenamelookup[name];
 	  }
 	  
 	  var msg = ""; // TextMessage
@@ -109,12 +116,14 @@
 		} catch(e){}
 	}
 	
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 
@@ -126,14 +135,12 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){}
 			sendResponse(false);
@@ -146,7 +153,6 @@
 				if (mutation.addedNodes.length) {
 					var xxx = mutation.addedNodes;
 					for (var i = 0; i< xxx.length; i++) {
-						console.log(xxx[i]);
 						try {
 							setTimeout(function(eee){callback(eee);},1000,xxx[i]);
 						} catch(e){}
@@ -162,7 +168,6 @@
 	}
 	console.log("social stream injected");
 	
-	
 	setInterval(function(){
 		var target = document.querySelector("[class*='chatContainer']");
 		if (target && !target.marked){
@@ -172,6 +177,78 @@
 			});
 		}
 		
-	},3000);
+		if (remoteConnection && remoteConnection.datachannel){ // only poke ourselves if tab is hidden, to reduce cpu a tiny bit.
+			remoteConnection.datachannel.send("KEEPALIVE")
+		}
+	},1000);
+	
+	///////// the following is a loopback webrtc trick to get chrome to not throttle this twitch tab when not visible.
+	try {
+		var receiveChannelCallback = function(e){
+			remoteConnection.datachannel = event.channel;
+			remoteConnection.datachannel.onmessage = function(e){};
+			remoteConnection.datachannel.onopen = function(e){};
+			remoteConnection.datachannel.onclose = function(e){};
+		}
+		var errorHandle = function(e){}
+		var localConnection = new RTCPeerConnection();
+		var remoteConnection = new RTCPeerConnection();
+		localConnection.onicecandidate = (e) => !e.candidate ||	remoteConnection.addIceCandidate(e.candidate).catch(errorHandle);
+		remoteConnection.onicecandidate = (e) => !e.candidate || localConnection.addIceCandidate(e.candidate).catch(errorHandle);
+		remoteConnection.ondatachannel = receiveChannelCallback;
+		localConnection.sendChannel = localConnection.createDataChannel("sendChannel");
+		localConnection.sendChannel.onopen = function(e){localConnection.sendChannel.send("CONNECTED");};
+		localConnection.sendChannel.onclose =  function(e){};
+		localConnection.sendChannel.onmessage = function(e){};
+		localConnection.createOffer()
+			.then((offer) => localConnection.setLocalDescription(offer))
+			.then(() => remoteConnection.setRemoteDescription(localConnection.localDescription))
+			.then(() => remoteConnection.createAnswer())
+			.then((answer) => remoteConnection.setLocalDescription(answer))
+			.then(() =>	{
+				localConnection.setRemoteDescription(remoteConnection.localDescription);
+				console.log("KEEP ALIVE TRICk ENABLED");
+			})
+			.catch(errorHandle);
+	} catch(e){
+		console.log(e);
+	}
+	
+	 try {
+		window.onblur = null;
+		window.blurred = false;
+		document.hidden = false;
+		document.visibilityState = "visible";
+		document.mozHidden = false;
+		document.webkitHidden = false;
+	} catch(e){	}
+	
+	try {
+		document.hasFocus = function () {return true;};
+		window.onFocus = function () {return true;};
 
+		Object.defineProperty(document, "hidden", { value : false});
+		Object.defineProperty(document, "mozHidden", { value : false});
+		Object.defineProperty(document, "msHidden", { value : false});
+		Object.defineProperty(document, "webkitHidden", { value : false});
+		Object.defineProperty(document, 'visibilityState', { get: function () { return "visible"; } });
+	} catch(e){	}
+	
+	try {
+		document.onvisibilitychange = undefined;
+	} catch(e){	}
+
+	try {
+		for (event_name of ["visibilitychange",
+			"webkitvisibilitychange",
+			"blur", // may cause issues on some websites
+			"mozvisibilitychange",
+			"msvisibilitychange"]) {
+				try{
+					window.addEventListener(event_name, function(event) {
+						event.stopImmediatePropagation();
+					}, true);
+				} catch(e){}
+		}
+	} catch(e){	} 
 })();

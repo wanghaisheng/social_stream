@@ -24,6 +24,16 @@
 	var lastMessage = "";
 	var lastImg = "";
 	var lastTimestamp = Date.now();
+	
+	
+	function walkTheDOM(node, func) {
+	  func(node);
+	  node = node.firstChild;
+	  while (node) {
+		  walkTheDOM(node, func);
+		  node = node.nextSibling;
+	  }
+	}
 
 	function processMessage(ele){
 		if (ele && ele.marked){
@@ -36,15 +46,21 @@
 
 		var chatimg = "";
 		try {
-			chatimg = ele.children[0].children[0].children[0].querySelector("img").src;
+			chatimg = ele.children[0].children[0].children[0].querySelector("img.MuiAvatar-img:last-child:not([src^='https://restream.io/img/api/platforms/'])").src;
 		} catch(e){
 			//console.log(e);
 		}
 		
+		if (chatimg && (chatimg === "https://chat.restream.io/assets/icon-platform/restream-icon-white.svg")){
+			chatimg = "";
+		}
+		var nameColor = "";
         var name = "";
+		
 		try {
-			name =  ele.children[0].children[0].children[1].innerText;
+			name = ele.children[0].children[0].children[1].innerText;
 			name = name.trim();
+			nameColor = ele.children[0].children[0].children[1].children[0].style.color;
 		} catch(e){
 			//console.log(e);
 		}
@@ -53,6 +69,7 @@
 			try {
 				name = ele.querySelector(".MuiTypography-subtitle2").innerText;
 				name = name.trim();
+				nameColor = ele.querySelector(".MuiTypography-subtitle2").style.color;
 				} catch(e){
 				//console.log(e);
 			}
@@ -60,7 +77,25 @@
 
 		var msg = "";
 		try {
-			msg = ele.querySelector('.chat-text-normal').innerText;
+			//msg = ele.querySelector('.chat-text-normal').innerText;
+			
+			walkTheDOM(ele.querySelector('.chat-text-normal'), function(node) {
+				if (node.nodeName === "#text") {
+					var text = node.data.trim();
+					if (text.length) {
+						msg += text;
+					}
+				} else if (node.nodeName == "IMG") {
+					if (settings.textonlymode){
+						//if (node.alt){
+						//	msg += node.alt;
+						//}
+					} else {
+						msg += node.outerHTML;
+					}
+				}
+			});
+			
 		} catch(e){
 			//console.log(e);
 		}
@@ -68,18 +103,28 @@
 		if (msg){
 			msg = msg.trim();
 		}
+		
+		//data.sourceImg = brandedImageURL;
+		
+		var sourceImg = "restream.png";
+		try {
+			sourceImg = ele.querySelector("img:last-child[src^='https://restream.io/img/api/platforms/']").src;
+		} catch(e){}
+		
 
 		var data = {};
 		data.chatname = name;
 		data.chatbadges = "";
 		data.backgroundColor = "";
 		data.textColor = "";
+		data.nameColor = nameColor;
 		data.chatmessage = msg;
 		data.chatimg = chatimg;
 		data.hasDonation = "";
-		data.hasMembership = "";;
+		data.hasMembership = "";
 		data.contentimg = "";
 		data.type = "restream";
+		data.sourceImg = sourceImg;
 		
 		
 		if (data.lastMessage === lastMessage){
@@ -97,14 +142,9 @@
 		lastImg = data.chatimg;
 		lastTimestamp = Date.now();
 		
-		if (data.chatimg){
-			toDataURL(data.chatimg, function(dataUrl) {
-				data.chatimg = dataUrl;
-				pushMessage(data);
-			});
-		} else {
-			pushMessage(data);
-		}
+		
+		pushMessage(data);
+		
 	}
 	
 	
@@ -136,14 +176,12 @@
 						sendResponse(false);
 						return;
 					}
-					if ("textOnlyMode" == request){
-						textOnlyMode = true;
-						sendResponse(true);
-						return;
-					} else if ("richTextMode" == request){
-						textOnlyMode = false;
-						sendResponse(true);
-						return;
+					if (typeof request === "object"){
+						if ("settings" in request){
+							settings = request.settings;
+							sendResponse(true);
+							return;
+						}
 					}
 				} catch(e){}
 				sendResponse(false);
@@ -151,12 +189,14 @@
 		);
 	}
 	
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 

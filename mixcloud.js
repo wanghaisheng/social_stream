@@ -25,6 +25,8 @@
 		  ele.marked = true;
 		}
 		
+		//console.log(ele);
+		
 		if (document.querySelector("chat-message__container")){
 			if (document.querySelector("chat-message__container").marked){
 				return;
@@ -36,21 +38,53 @@
 
 		var chatimg = "";
 		var msg = "";
-		
+		var name = "";
+		var dono = "";
+		var username= "";
 		try{
 		   chatimg = ele.querySelector("img").src;
+		   if (chatimg){
+			chatimg = chatimg.replace("26x26", "150x150");
+			chatimg = chatimg.replace("24x24", "150x150");
+		   }
+		  // name = ele.querySelector("img").alt;
 		} catch(e){}
+		
+		if (!name){
+			try {
+				name = ele.querySelector(".mixcloud-live-chat-row-link[href]").innerText;
+			} catch(e){}
+		}
+		try {
+			username = ele.querySelector(".mixcloud-live-chat-row-link[href]").href;
+			username = username.split("/");
+			username.pop();
+			username = username.pop();
+		}catch(e){}
+		
 		try{
 			if (ele.querySelector(".mixcloud-live-chat-row-link")){
-			  var name = ele.querySelector(".mixcloud-live-chat-row-link").innerText;
+			  name = ele.querySelector(".mixcloud-live-chat-row-link").innerText;
 			  if (name){
 				name = name.trim();
 			  }
-			  
 			  msg = ele.querySelector('.mixcloud-live-chat-row-link').parentNode.nextElementSibling.innerText;
 			} 
 		} catch(e){}
-		if (msg){
+		
+		if (!msg){
+			try {
+				msg = ele.querySelector("[class*='ChatSubscriptionMessageRow']").textContent || querySelector("[class*='ChatSubscriptionMessageRow']").innerText;
+				msg = msg.trim();
+				try {
+					dono = ele.querySelector("[class*='ChatSubscriptionMessageRow'] > p").childNodes;
+					dono = dono[dono.length-1].textContent || dono[dono.length-1].innerText || "";
+					dono = dono.trim();
+				} catch(e){
+				}
+			} catch(e){
+			}
+		} else {
 			msg = msg.trim();
 			if (name){
 				if (msg.startsWith(name)){
@@ -62,12 +96,13 @@
 
 		var data = {};
 		data.chatname = name;
+		data.username = username;
 		data.chatbadges = "";
 		data.backgroundColor = "";
 		data.textColor = "";
 		data.chatmessage = msg;
 		data.chatimg = chatimg;
-		data.hasDonation = "";
+		data.hasDonation = dono;
 		data.hasMembership = "";;
 		data.contentimg = "";
 		data.type = "mixcloud";
@@ -78,14 +113,16 @@
 		}
 		lastMessage = JSON.stringify(data);
 		
-		if (data.chatimg){
+		pushMessage(data);
+		
+		/* if (data.chatimg){
 			toDataURL(data.chatimg, function(dataUrl) {
 				data.chatimg = dataUrl;
 				pushMessage(data);
 			});
 		} else {
 			pushMessage(data);
-		}
+		} */
 	}
 
 	function pushMessage(data){
@@ -96,12 +133,14 @@
 	}
 
 
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 	
@@ -113,14 +152,12 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){}
 			sendResponse(false);
@@ -131,6 +168,9 @@
 		var onMutationsObserved = function(mutations) {
 			mutations.forEach(function(mutation) {
 				if (mutation.addedNodes.length) {
+					if (mutation.addedNodes[0].previousElementSibling && mutation.addedNodes[0].previousElementSibling.previousElementSibling && mutation.addedNodes[0].previousElementSibling.previousElementSibling.previousElementSibling && mutation.addedNodes[0].previousElementSibling.previousElementSibling.previousElementSibling.previousElementSibling){
+						return; // don't allow old messages from loading
+					}
 					for (var i = 0, len = mutation.addedNodes.length; i < len; i++) {
 						if (mutation.addedNodes[i].classList.contains("mixcloud-live-chat-row")){
 							processMessage(mutation.addedNodes[i]);

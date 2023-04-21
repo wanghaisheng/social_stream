@@ -35,11 +35,20 @@
 			chatimg = ele.querySelector('[data-tid="message-avatar"]').querySelector("img").src;
 		} catch(e){
 			
+			if (!chatimg){
+				try {
+					chatimg = document.querySelector("profile-picture>.user-picture").src;
+				} catch(e){
+					//console.error(e);
+				}
+			}
+				
 		}
+		
 		
         var name = "";
 		if (ele.querySelector(".ui-chat__message__author")){
-		  name = ele.querySelector(".ui-chat__message__author").innerText;
+			name = ele.querySelector(".ui-chat__message__author").innerText;
 		} 
 
 		if (!chatimg){
@@ -68,7 +77,7 @@
 
 		var msg = "";
 		try {
-			msg = ele.querySelector('.ui-chat__message__content').innerText;
+			msg = ele.querySelector('.ui-chat__message__content, .ui-chat__messagecontent').innerText;
 		} catch(e){}
 		
 		if (msg){
@@ -212,14 +221,12 @@
 						sendResponse(false);
 						return;
 					}
-					if ("textOnlyMode" == request){
-						textOnlyMode = true;
-						sendResponse(true);
-						return;
-					} else if ("richTextMode" == request){
-						textOnlyMode = false;
-						sendResponse(true);
-						return;
+					if (typeof request === "object"){
+						if ("settings" in request){
+							settings = request.settings;
+							sendResponse(true);
+							return;
+						}
 					}
 				} catch(e){}
 				sendResponse(false);
@@ -227,12 +234,14 @@
 		);
 	}
 	
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
 	});
 

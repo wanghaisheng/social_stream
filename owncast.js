@@ -29,9 +29,13 @@
 		chatmessage = ele.querySelector(".message-text").innerHTML;
 	  } catch(e){}
 	  
-	  if (textOnlyMode){
-		  chatmessage = ele.querySelector(".message-text").innerText;
+	  if (settings.textonlymode){
+		   try{
+				chatmessage = ele.querySelector(".message-text").innerText;
+		   } catch(e){}
 	  }
+	  
+	  if (!chatmessage && !hasDonation){return;}
 	  
 	  var chatimg = "";
 	  var chatdonation = "";
@@ -63,30 +67,30 @@
 					sendResponse(true);
 					return;
 				}
-				if ("textOnlyMode" == request){
-					textOnlyMode = true;
-					sendResponse(true);
-					return;
-				} else if ("richTextMode" == request){
-					textOnlyMode = false;
-					sendResponse(true);
-					return;
+				if (typeof request === "object"){
+					if ("settings" in request){
+						settings = request.settings;
+						sendResponse(true);
+						return;
+					}
 				}
 			} catch(e){}
 			sendResponse(false);
 		}
 	);
 
-	var textOnlyMode = false;
+	var settings = {};
+	// settings.textonlymode
+	// settings.streamevents
+	
+	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
 		if ("settings" in response){
-			if ("textonlymode" in response.settings){
-				textOnlyMode = response.settings.textonlymode;
-			}
+			settings = response.settings;
 		}
-	});  /////
+	});
 
-	function onElementInserted(containerSelector, callback) {
+	function onElementInserted(target, callback) {
 		var onMutationsObserved = function(mutations) {
 			mutations.forEach(function(mutation) {
 				if (mutation.addedNodes.length) {
@@ -98,7 +102,7 @@
 				}
 			});
 		};
-		var target = document.querySelector(containerSelector);
+		
 		if (!target){return;}
 		var config = { childList: true, subtree: true };
 		var MutationObserver = window.MutationObserver || window.WebKitMutationObserver;
@@ -106,7 +110,16 @@
 		observer.observe(target, config);
 	}
 	console.log("social stream injected");
-	onElementInserted("#messages-only", function(element){
-	  processMessage(element, false);
-	});
+	
+	var timer = setInterval(function(){
+		var target = document.querySelector("#messages-only, #messages-container");
+		if (target && !target.set123){
+			target.set123 = true;
+			onElementInserted(target, function(element){
+			  processMessage(element, false);
+			});
+		}
+	},1000);
+	
+	
 })();
