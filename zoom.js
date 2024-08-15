@@ -4,19 +4,87 @@
 	var lastName = "";
 	var lastImage = "";
 	var messageHistory = [];
+
+  setInterval(() => {
+    lastMessage = {}
+  }, 5000)
+
+	function toDataURL(url, callback) {
+	  var xhr = new XMLHttpRequest();
+	  xhr.onload = function() {
+
+		var blob = xhr.response;
+
+		if (blob.size > (55 * 1024)) {
+		  callback(url); // Image size is larger than 25kb.
+		  return;
+		}
+
+		var reader = new FileReader();
+
+
+		reader.onloadend = function() {
+		  callback(reader.result);
+		}
+		reader.readAsDataURL(xhr.response);
+	  };
+	  xhr.open('GET', url);
+	  xhr.responseType = 'blob';
+	  xhr.send();
+	}
 	
-	function toDataURL(url, callback) { // not needed with Facebook I think.
-		var xhr = new XMLHttpRequest();
-		xhr.onload = function() {
-			var reader = new FileReader();
-			reader.onloadend = function() {
-				callback(reader.result);
+	function escapeHtml(unsafe){
+		try {
+			if (settings.textonlymode){ // we can escape things later, as needed instead I guess.
+				return unsafe;
 			}
-			reader.readAsDataURL(xhr.response);
-		};
-		xhr.open('GET', url);
-		xhr.responseType = 'blob';
-		xhr.send();
+			return unsafe
+				 .replace(/&/g, "&amp;")
+				 .replace(/</g, "&lt;")
+				 .replace(/>/g, "&gt;")
+				 .replace(/"/g, "&quot;")
+				 .replace(/'/g, "&#039;") || "";
+		} catch(e){
+			return "";
+		}
+	}
+
+	function getAllContentNodes(element) { // takes an element.
+		var resp = "";
+		
+		if (!element){return resp;}
+		
+		if (!element.childNodes || !element.childNodes.length){
+			if (element.textContent){
+				return escapeHtml(element.textContent) || "";
+			} else {
+				return "";
+			}
+		}
+		
+		element.childNodes.forEach(node=>{
+			
+			if (node.nodeName == "BUTTON"){
+				return;
+			}
+			
+			if (node.childNodes.length){
+				resp += getAllContentNodes(node)
+			} else if ((node.nodeType === 3) && node.textContent && (node.textContent.trim().length > 0)){
+				resp += escapeHtml(node.textContent.trim())+" ";
+			} else if (node.nodeType === 1){
+				if (!settings.textonlymode){
+					if ((node.nodeName == "IMG") && node.src){
+						node.src = node.src+"";
+					}
+					resp += node.outerHTML;
+					if (node.nodeName == "IMG"){
+						resp += " ";
+					}
+				}
+			}
+		});
+		return resp;
 	}
 	
 	function processMessage(ele, id=false){
@@ -66,6 +134,7 @@
 		  name = ele.querySelector(".chat-item__sender").innerText;
 		  if (name){
 			  name = name.trim();
+			  name = escapeHtml(name);
 		  }
 		}
 
@@ -87,6 +156,7 @@
 					    name = prev.querySelector(".chat-item__sender").innerText;
 					    if (name){
 						    name = name.trim();
+							name = escapeHtml(name);
 					    }
 					    
 						chatimg = prev.querySelector(".chat-item__user-avatar") || "";
@@ -103,7 +173,7 @@
 
 		var msg = "";
 		try {
-			msg = getAllContentNodes(ele.querySelector('.chat-message__text-content, .new-chat-message__content'));
+			msg = getAllContentNodes(ele.querySelector('.chat-rtf-box__display, .new-chat-message__text-box, .new-chat-message__text-content, .chat-message__text-content, .new-chat-message__content'));
 		} catch(e){
 
 		}
@@ -138,8 +208,9 @@
 		data.chatmessage = msg;
 		data.chatimg = chatimg;
 		data.hasDonation = "";
-		data.hasMembership = "";;
+		data.membership = "";;
 		data.contentimg = ""; // ctt;
+		data.textonly = settings.textonlymode || false;
 		data.type = "zoom";
 
 		if (lastMessage === JSON.stringify(data)){ // prevent duplicates, as zoom is prone to it.
@@ -170,7 +241,7 @@
 	
 	var settings = {};
 	// settings.textonlymode
-	// settings.streamevents
+	// settings.captureevents
 	
 	
 	chrome.runtime.sendMessage(chrome.runtime.id, { "getSettings": true }, function(response){  // {"state":isExtensionOn,"streamID":channel, "settings":settings}
@@ -211,32 +282,6 @@
 		pushMessage(data);
 	}
 	
-	function getAllContentNodes(element) {
-		var resp = "";
-		element.childNodes.forEach(node=>{
-			
-			if (node.childNodes.length){
-				if (node.classList.contains("new-chat-message__options")){return;}
-				resp += getAllContentNodes(node)
-			} else if ((node.nodeType === 3) && (node.textContent.trim().length > 0)){
-				if (settings.textonlymode){
-					resp += node.textContent.trim()+" ";
-				} else {
-					resp += node.textContent.trim()+" ";
-				}
-			} else if (node.nodeType === 1){
-				if (settings.textonlymode){
-					//if ("alt" in node){
-					//	resp += node.alt.trim()+" ";
-					//}
-				} else {
-					resp += node.outerHTML;
-				}
-			} 
-		});
-		return resp;
-	}
-	
 	var questionList = [];
 	function processQuestion(ele){
 		var question = getAllContentNodes(ele.querySelector(".q-a-question__question-content"));
@@ -269,7 +314,7 @@
 		data.chatmessage = question;
 		data.chatimg = chatimg;
 		data.hasDonation = "";
-		data.hasMembership = "";;
+		data.membership = "";;
 		data.contentimg = "";
 		data.question = true;
 		data.type = "zoom";
@@ -278,7 +323,7 @@
 	}
 	
 
-	function onElementInserted(containerSelector) {
+	function onElementInserted(target) {
 		var onMutationsObserved = function(mutations) {
 			mutations.forEach(function(mutation) {
 				if (mutation.addedNodes.length) {
@@ -296,7 +341,6 @@
 				}
 			});
 		};
-		var target = document.querySelector(containerSelector);
 		if (!target){return;}
 		var config = { childList: true, subtree: true };
 		var MutationObserver = window.MutationObserver || window.WebKitMutationObserver;
@@ -308,20 +352,52 @@
 
 	setInterval(function(){
 		messageHistory = messageHistory.slice(-500);
+		
 		if (document.getElementById("chat-list-content")){
 			if (!document.getElementById("chat-list-content").marked){
+				console.log("NOT Makred!");
 				lastName = "";
 				lastImage = "";
 				document.getElementById("chat-list-content").marked=true;
-				onElementInserted("#chat-list-content");
+				onElementInserted(document.querySelector("#chat-list-content"));
 			}
+		} else if (document.querySelectorAll('iframe').length){
+			document.querySelectorAll('iframe').forEach( item =>{
+				try {
+					if (item && item.contentWindow && item.contentWindow.document && item.contentWindow.document.body.querySelector('#chat-list-content')){
+						if (!item.contentWindow.document.body.querySelector('#chat-list-content').marked){
+							console.log("FOUND UNMARKED IFRAME ");
+							lastName = "";
+							lastImage = "";
+							item.contentWindow.document.body.querySelector('#chat-list-content').marked=true;
+							onElementInserted(item.contentWindow.document.body.querySelector('#chat-list-content'));
+						}
+					}
+				} catch(e){}
+			});
 		}
 		if (document.getElementById("poll__body")){
 			streamPollRAW(document.getElementById("poll__body"));
 		}
+		
+		document.querySelectorAll('[class^="animation-reactions/"]:not([data-skip])').forEach(reaction=>{
+			reaction.dataset.skip = true;
+			
+			var data = {};
+			data.chatname = "";
+			data.chatmessage = reaction.querySelector("svg,img").outerHTML;
+			if (!data.chatmessage){return;}
+			data.event = "reaction";
+			data.type = "zoom";
+			data.textonlymode = false;
+			console.log(data);
+			pushMessage(data);
+			
+		});
 
 		if (document.getElementById('chat-list-content')) {
-		    document.getElementById('chat-list-content').scrollTop = 10000; // prevent chat box from stop scrolling, which makes messages stop appearing
+		    // prevent chat box from stop scrolling, which makes messages stop appearing
+        document.getElementById('chat-list-content').scrollTop = document.getElementById('chat-list-content').scrollTop + 1000
 		}
 
 		if (document.querySelector('[aria-label="open the chat pane"]')) { // prevent chat box from being closed after screen-share by keeping it always open

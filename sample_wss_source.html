@@ -1,4 +1,4 @@
-<html>
+<html lang="en">
 <body>
 <script>
 	var conCon = 1;
@@ -50,7 +50,7 @@
 		});
 	}
 	
-	var serverURL = "wss://api.overlay.ninja";
+	var serverURL = "wss://io.socialstream.ninja";
 	socketserver = new WebSocket(serverURL); 
 	setupSocket();
 	
@@ -61,11 +61,12 @@
 		data.backgroundColor = "";
 		data.textColor = "";
 		data.chatmessage = "Some test message here. 🥷";
-		data.chatimg = "unknown.png";
+		data.chatimg = "https://socialstream.ninja/sources/images/unknown.png";
 		data.hasDonation = "$100";
-		data.hasMembership = "";;
+		data.membership = "";;
 		data.contentimg = "";
 		data.type = "zoom";
+		data.textonly = true;
 		
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		

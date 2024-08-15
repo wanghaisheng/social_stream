@@ -1,4 +1,4 @@
-<html>
+<html lang="en">
 <head>
 	<meta name="viewport" content="width=device-width,initial-scale=1" />
 	<meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
@@ -6,6 +6,7 @@
 	<title>Social Stream - Emotes Wall</title>
 	<meta name="title" content="Social Stream - Emotes Wall" />
 	<link rel="icon" href="./icons/favicon.ico" />
+	<link rel="preload" href="./thirdparty/NotoColorEmoji.ttf" as="font" type="font/ttf" crossorigin="anonymous">
 	<style>
 		:root {
 			--font-color: #FFF;
@@ -13,7 +14,7 @@
 			--background-color: #0000;
 			--font-size: 240%;
 			--electron-drag-fix: drag;
-			--width: 48px;
+			--width: 36px;
 			--x-speed: 13s;
 			--y-speed: 7s;
 		}
@@ -47,14 +48,30 @@
 			transform: translateX(calc(100vw - var(--width)));
 		  }
 		}
+		@keyframes x1 {
+		  100% {
+			transform: translateX(2vw);
+		  }
+		}
 		@keyframes y {
 		  100% {
 			transform: translateY(calc(100vh - var(--width)));
 		  }
 		}
+		@keyframes y1 {
+		  100% {
+			transform: translateY(calc(100vh + var(--width)));
+		  }
+		}
+		
+		@font-face {
+		  font-family: NotoColorEmojiLimited;
+		  unicode-range: U+1F1E6-1F1FF;
+		  src: url(./thirdparty/NotoColorEmoji.ttf);
+		}
 
 		body {
-			font-family: Roboto, Arial, Roboto, sans-serif;
+			font-family: 'NotoColorEmojiLimited', Roboto, Arial, sans-serif;
 			color: var(--font-color);
 			margin: 0 0;
 			background-color: var(--background-color);
@@ -92,7 +109,7 @@
 			100% { opacity: 1; }
 		}
 		
-		img {
+		div > span {
 			max-width: calc(var(--width) * 1.5);
 			max-height: var(--width);
 			position:relative;
@@ -100,6 +117,17 @@
 			padding: 0;
 			object-fit: contain;
 			vertical-align: top;
+			display: block;
+		}
+		
+		img {
+			max-width: calc(var(--width) * 1.5);
+			max-height: var(--width);
+			margin: auto;
+			padding: 0;
+			object-fit: contain;
+			vertical-align: top;
+			min-height:100%;
 		}
 
 
@@ -117,6 +145,7 @@
 			object-fit:contain;
 		}
 		
+		
 		.electronDraggable {
 			-webkit-app-region: var(--electron-drag-fix);
 		}
@@ -125,10 +154,20 @@
 			0% { opacity: 1; }
 			100% { opacity: 0; }
 		}
+		
+		span.zero-width-parent {
+			display: inline-block;
+			width: 0;
+			position:absolute;
+		}
+		span.zero-width-parent img.zero-width-emote {
+			right: 0;
+			position:absolute;
+		}
 
 	</style>
 </head>
-<body class='electronDraggable' id="output">
+<body class="electronDraggable" id="output">
 	<script>
 	window.onerror = function backupErr(errorMsg, url=false, lineNumber=false) {
 		console.error(errorMsg);
@@ -172,6 +211,7 @@
 	var html = document.documentElement;
 	var mainOutputWindow = document.getElementById("output");
 	var showdupes = true;
+	var hidereplies = false;
 
 	try {
 		if (electronApi){ // fix for electron dragging.
@@ -190,14 +230,35 @@
 		}
 	} catch(e){
 	}
-
+	
 	var timeoutDelay = 5000;
+	var floatup = false;
+	
 	if (urlParams.has("showtime")){
 		timeoutDelay = parseInt(urlParams.get("showtime")) || 0; // 0 disables.
+	}
+	
+	if (urlParams.has("floatup")){
+		floatup = true;
+		timeoutDelay = timeoutDelay || 2000;
 	}
 
 	if (urlParams.has("hidedupes")) {
 		showdupes = false;
+	}
+	
+	var maxShow = false;
+	if (urlParams.has("max") || urlParams.has("limit")) {
+		maxShow = parseInt(urlParams.has("limit")) || parseInt(urlParams.get("max")) || 0;
+	}
+	
+	var membersonly = false;
+	if (urlParams.has("membersonly")) {
+		membersonly = true;
+	}
+	
+	if (urlParams.has("hidereplies")) {
+		hidereplies = true;
 	}
 
 	if (urlParams.has("session")){
@@ -256,6 +317,12 @@
 	if (urlParams.has("limit")){
 		customNodeLimit = parseInt(urlParams.get("limit")) || 100;
 	}
+	
+	var badEmotes = false;
+	if (urlParams.has("bademotes")) {
+		badEmotes = urlParams.get("bademotes");
+		badEmotes = badEmotes.match(/(\p{Regional_Indicator}\p{Regional_Indicator}|\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(\p{Emoji_Modifier}|\u200D\p{Emoji})*|\p{Emoji_Component}\uFE0F/gu) || [];
+	}
 
 	var custombot = false;
 	if (urlParams.has("myname") || urlParams.has("botlist")){
@@ -271,11 +338,13 @@
 	if (urlParams.has("hidebots")){
 		doNotShowBot = true;
 	}
-
+	
+	let width = 48;
+	
 	if (urlParams.has("scale")){
 		scale = urlParams.get("scale") || 1.0;
 		scale = parseFloat(scale);
-		let width = parseInt(48 * scale);
+		width = parseInt(48 * scale);
 		document.documentElement.style.setProperty("--width", width+"px");
 		let fontsize = parseInt(240 * scale);
 		document.documentElement.style.setProperty("--font-size", fontsize+"%");
@@ -283,7 +352,7 @@
 
 	var conCon = 1;
 	var socketserver = false;
-	var serverURL = "wss://api.overlay.ninja";
+	var serverURL = "wss://io.socialstream.ninja";
 
 	function setupSocket(){
 		socketserver.onclose = function (){
@@ -295,7 +364,7 @@
 		};
 		socketserver.onopen = function (){
 			conCon = 1;
-			socketserver.send(JSON.stringify({"join":roomID, "out":2, "in":1}));
+			socketserver.send(JSON.stringify({"join":roomID, "out":3, "in":4}));
 		};
 		socketserver.addEventListener('message', function (event) {
 			var resp = false
@@ -313,8 +382,8 @@
 		});
 	}
 	
-	if (urlParams.has("server")){
-		serverURL = urlParams.get("server") || serverURL;
+	if (urlParams.has("server") || urlParams.has("server2")){
+		serverURL = urlParams.get("server") ||  urlParams.get("server2") || serverURL;
 		socketserver = new WebSocket(serverURL);
 		setupSocket();
 	}
@@ -323,6 +392,15 @@
 		var chroma = urlParams.get("chroma") || "0F0";
 		document.body.style.backgroundColor = "#"+chroma;
 	}
+	
+	var speed = 1.0;
+	if (urlParams.has("speed")){
+		speed = parseFloat(urlParams.get("speed")) || 1;
+		speed = 1 / speed;
+		document.documentElement.style.setProperty("--x-speed", (13*speed)+"%"); // not used
+		document.documentElement.style.setProperty("--y-speed",  (7*speed)+"%"); // not used
+	}
+	
 	
 	try {
 		if (window.obsstudio){
@@ -379,8 +457,8 @@
 		}
 	}
 
-	iframe = document.createElement("iframe");
-	iframe.src = "https://vdo.socialstream.ninja/?ln&salt=vdo.ninja&password="+password+"&push&label=dock&vd=0&ad=0&novideo&noaudio&autostart&cleanoutput&room="+roomID;
+	iframe = document.createElement("iframe"); // we can leave it called "dock", as it will get all the same messages the dock gets. This could be optimized of course..
+	iframe.src = "https://vdo.socialstream.ninja/?ln&salt=vdo.ninja&notmobile&notmobile&password="+password+"&solo&view="+roomID+"&novideo&noaudio&label=dock&cleanoutput&room="+roomID; // view only connection (data two way of course)
 	iframe.style.width = "0px";
 	iframe.style.height = "0px";
 	iframe.style.position = "fixed";
@@ -445,7 +523,6 @@
 	}
 
 	function processData(data){
-
 		var invisible = false;
 
 		if (!("id" in data)){
@@ -456,8 +533,11 @@
 			return;
 		}
 		
-		
-		console.log(data);
+		if (membersonly){
+			if (!data.membership && !data.hasMembership){
+				return;
+			}
+		}
 		
 		if (data.chatname){
 			if (custombot && doNotShowBot && custombot.includes(data.chatname.toLowerCase().replace(/[^a-z0-9_]+/gi, ""))){ // because why not. :)
@@ -468,42 +548,138 @@
 		let tmp = document.createElement("div");
 		tmp.innerHTML = data.chatmessage;
 		
+		
 		let svgs = tmp.querySelectorAll("svg"); // not bothering to check for dupes.
 		let images = tmp.querySelectorAll("img");
+		//console.log(data.chatmessage);
+	
+		try {
+			if (svgs){
+				if (showdupes){
+					svgs = [...svgs];
+				} else {
+					svgs = [...new Set(svgs)];
+				}
+			}
+		}catch(e){console.error(e);}
+		//try {
+		//	if (images){
+		//		images = [...images];
+		//	}
+		//}catch(e){console.error(e);}
 		
-		let emojis = [];
+		
 		let text = tmp.textContent || tmp.innerText || "";
+		
+		if (hidereplies && text){
+			let timetodie=false;
+			text.split(" ").forEach(word=>{
+				if (word.startsWith("@")){
+					timetodie=true;
+				}
+			});
+			if (timetodie){ // message contains a reply; via @name detected
+				return;
+			}
+		}
+		
 		text = text.replace("’","");
 		text = text.replace('"',"");
 		text = text.replace("'","");
 		
-		emojis = text.replace(/([\u0145-\u0148]|[\u1F1E1-\u1F1FF]|\u2026)/ig, "");
+		let emojis = [];
 		
-		emojis = emojis.replace(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDE8-\uDDFF][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEA-\uDDF8][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEC-\uDDF9][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEE-\uDDF9][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDF0-\uDDF7][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDF8-\uDDFF][\uD83C][\uDDE6-\uDDFF]/g, ""); // country codes
-							
-		emojis = emojis.replace(/[^\p{Emoji}\s]/ug, ''); // filters out puncuation and text characters
-							
-		emojis = emojis.match(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/ig);
+		// 🏻
 		
-		if (!showdupes){
-			try {
-				if (emojis){
+		
+		//emojis = text.replace(/([\u0145-\u0148]|[\u1F1E1-\u1F1E5]|\u2026)/ig, ""); // flags: // U+1F1E6-1F1FF;
+		//emojis = text.replace(/([\u0145-\u0148]|[\u1F1E1-\u1F1FF]|\u2026)/ig, ""); // no flags
+		//emojis = text.replace(/([\u0145-\u0148]|[\u1F1E1-\u1F1FF]|\u2026)(?![\u1F1E6-\u1F1FF])/ig, ""); // Excludes U+1F1E6-1F1FF
+		//emojis = text.replace(/([\u0145-\u0148]|(?![\u1F1E6-\u1F1FF])[\u1F1E1-\u1F1FF]|\u2026)/ig, ""); // Excludes U+1F1E6-1F1FF
+		
+		//emojis = emojis.replace(/[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDE8-\uDDFF][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEA-\uDDF8][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEC-\uDDF9][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDEE-\uDDF9][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDF0-\uDDF7][\uD83C][\uDDE6-\uDDFF]|[\uD83C][\uDDF8-\uDDFF][\uD83C][\uDDE6-\uDDFF]/g, ""); // country codes
+							
+		//emojis = emojis.replace(/[^\p{Emoji}\s]/ug, ''); // filters out puncuation and text characters
+							
+		//emojis = emojis.match(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF])/ig);
+		//emojis = emojis.match(/\p{Emoji_Presentation}|\p{Emoji}\uFE0F/gu) || [];
+		//console.log(text);
+		
+		emojis = text.match(/(\p{Regional_Indicator}\p{Regional_Indicator}|\p{Emoji_Presentation}|\p{Emoji}\uFE0F)(\p{Emoji_Modifier}|\u200D\p{Emoji})*|\p{Emoji_Component}\uFE0F/gu) || [];
+		
+		//console.log(emojis);
+
+		
+		try {
+			if (emojis){
+				if (showdupes){
+					emojis = [...emojis];
+				} else {
 					emojis = [...new Set(emojis)];
 				}
-			}catch(e){console.error(e);}
+			}
+		}catch(e){console.error(e);}
+		
+		if (!showdupes){
 			try{	
 				let images2 = {};
 				let images3 = [];
+				
+				let prevImage = null;
+				let prevImageCancelled = false;
 			
 				for (var i=0;i<images.length;i++){
+					
+					if (images[i].parentNode && images[i].parentNode.classList.contains("zero-width-parent")){
+						images[i].className = "zero-width-emote";
+					}
+					
 					if (images[i].src && images2[images[i].src]){
-						continue;
+						if (!images[i].classList.contains("zero-width-emote") || !prevImage){
+							prevImage = null;
+							prevImageCancelled = true;
+							continue;
+						}
+					} else if (images[i].srcset && images2[images[i].srcset]){
+						if (!images[i].classList.contains("zero-width-emote") || !prevImage){
+							prevImage = null;
+							prevImageCancelled = true;
+							continue;
+						}
 					}
 					images[i].onerror = function(){
-						this.style.display='none';
-						this.remove();
+						if (this.srcBackup){
+							this.src = this.srcBackup;
+							this.srcBackup = null;
+							delete this.srcBackup;
+						} else if (!this.alt || (this.alt.length!==2)){
+							this.style.display='none';
+							this.remove();
+						} else {
+							this.outerHTML = this.alt;
+						}
 					}
-					images2[images[i].src] = true;
+					
+					if (prevImage && images[i].classList.contains("zero-width-emote")){
+						prevImage.zeroImage = images[i];
+						images[i].zeroParent = prevImage;
+						prevImage = null;
+						prevImageCancelled = false;
+						images3.push(images[i]);
+						continue;
+					} else if (!images[i].classList.contains("zero-width-emote")){
+						prevImage = images[i];
+						prevImageCancelled = false;
+						images2[images[i].src || images[i].srcset] = true;
+					} else if (prevImageCancelled){
+						prevImage = null;
+						prevImageCancelled = false;
+						continue;
+					} else {
+						prevImage = null;
+						prevImageCancelled = false;
+					}
+					
 					images3.push(images[i]);
 				};
 				images = images3;
@@ -512,16 +688,69 @@
 			}
 		} else {
 			images.forEach(ele=>{
+				if (ele.parentNode && ele.parentNode.classList.contains("zero-width-parent")){
+					ele.className = "zero-width-emote";
+				}
+			
 				ele.onerror = function(){
-					this.style.display='none';
-					this.remove();
+					if (this.srcBackup){
+						this.src = this.srcBackup;
+						this.srcBackup = null;
+						delete this.srcBackup;
+					} else if (this.alt.length!==2){
+						this.style.display='none';
+						this.remove();
+					} else {
+						this.outerHTML = this.alt;
+					}
 				}
 			});
 		}
+		
+		if (maxShow){
+			let currentLeft = maxShow - document.querySelectorAll(".emoji").length;
+			if (emojis){
+				try {
+					if (emojis.length > currentLeft){
+						emojis = emojis.slice(0, currentLeft);
+						images = [];
+						svgs = [];
+					}
+					currentLeft -= emojis.length;
+				} catch(e){
+					console.error(e);
+					console.log(emojis);
+				}
+			}
+			if (images){
+				try {
+					if (images.length > currentLeft){
+						images = images.slice(0, currentLeft);
+						svgs = [];
+					}
+					currentLeft -= images.length;
+				} catch(e){
+					console.error(e);
+					console.log(images);
+				}
+			}
+			if (svgs){
+				if (svgs.length > currentLeft){
+					svgs = svgs.slice(0, currentLeft);
+				}
+				currentLeft -= svgs.length
+			}
+		}
 
 		if (emojis){
+		
+			if (badEmotes){
+				emojis = emojis.filter(emoji => !badEmotes.includes(emoji));
+			}
 			
 			emojis.forEach(img=>{
+				if (["🏻","🏼","🏾","🏾","🏾"].includes(img)){return;} // we will not process skin tones only, as likely a glitch.
+				
 				var node = document.createElement('div');
 				var node2 = document.createElement('div');
 				
@@ -529,9 +758,17 @@
 				node.classList.add("el-wrap");
 				node2.classList.add("el");
 				
-				node2.style.animation = "y "+(Math.random()*5+5)+"s linear infinite alternate";
+				if (floatup){
+					var speedup = Math.pow(Math.random(),0.05)*timeoutDelay;
+					node2.style.animation = "y1 "+speedup+"ms reverse linear 1";
+					node2.style.transform = "translateY(-"+width+"px)";
+					node2.style.top = -1*width+"px";
+					node2.style.position = "relative";
+				} else {
+					node2.style.animation = "y "+(Math.random()*5*speed+5*speed)+"s linear infinite alternate";
+					node2.style.animationDelay = Math.random()*-35*speed+"s";
+				}
 				
-				node2.style.animationDelay = Math.random()*-35+"s";
 				
 				node2.innerText = img;
 				node.appendChild(node2);
@@ -539,40 +776,85 @@
 				if (data.type){
 					node.dataset.sourceType = data.type;
 				}
+				node.classList.add("hidden");
+				mainOutputWindow.appendChild(node);
 				
-				setTimeout(function(node){
-					mainOutputWindow.appendChild(node);
-					node.style.animation = (Math.random()*10+5)+"s linear "+(Math.random()*-35)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+				
+				if (floatup){
+					node.classList.remove("hidden");
+					node.style.left =(parseInt(Math.random()*parseInt(window.innerWidth)) + "px");
+					node.style.animation = "x1 "+speedup+"s ease-in-out infinite alternate";
 					if (timeoutDelay){
-						setTimeout(function(node){fadeOutNode(node)},timeoutDelay, node);
+						setTimeout(function(node){fadeOutNode(node)},timeoutDelay+500, node);
 					}
-				},Math.random()*1000,node);
-				
-				
+					
+				} else {
+					setTimeout(function(node){
+						node.style.animation = (Math.random()*10*speed+5*speed)+"s linear "+(Math.random()*-35*speed)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+						if (timeoutDelay){
+							setTimeout(function(node){fadeOutNode(node)},timeoutDelay, node);
+						}
+						node.classList.remove("hidden");
+					},Math.random()*1000,node);
+				}
 			});
 		}
 		
+		var node2 = null;
 		images.forEach(img=>{
 			if (!img){return;}
+			if (node2 && img.classList.contains("zero-width-emote")){
+				var node = document.createElement('span');
+				node.appendChild(img);
+				node.classList.add("zero-width-parent");
+				node2.appendChild(node);
+				node2 = null;
+				return;
+			} 
 			var node = document.createElement('div');
-			node.appendChild(img);
+			node2 = document.createElement('span');
+			node2.appendChild(img);
+			node2.classList.add("el");
 			
+			if (floatup){
+				var speedup = Math.pow(Math.random(),0.05)*timeoutDelay;
+				node2.style.animation = "y1 "+speedup+"ms reverse linear 1";
+				node2.style.transform = "translateY(-"+width+"px)";
+				node2.style.top = -1*width+"px";
+				node2.style.position = "relative";
+			} else {
+				node2.style.animation = "y "+(Math.random()*5*speed+5*speed)+"s linear infinite alternate";
+				node2.style.animationDelay = Math.random()*-35*speed+"s";
+			}
+			
+			node.appendChild(node2);
 			node.classList.add("emoji");
 			node.classList.add("el-wrap");
-			img.classList.add("el");
-			img.style.animation = "y "+(Math.random()*5+5)+"s linear infinite alternate";
-			img.style.animationDelay = Math.random()*-35+"s";
 			
+			if (img.classList.contains("zero-width-emote")){
+				node2 = null;
+			}
 			if (data.type){
 				node.dataset.sourceType = data.type;
 			}
-			setTimeout(function(node){
-				mainOutputWindow.appendChild(node);
-				node.style.animation = (Math.random()*10+5)+"s linear "+(Math.random()*-35)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+			node.classList.add("hidden");
+			mainOutputWindow.appendChild(node);
+			if (floatup){
+				node.classList.remove("hidden");
+				node.style.left =(parseInt(Math.random()*parseInt(window.innerWidth)) + "px");
+				node.style.animation = "x1 "+speedup+"s ease-in-out infinite alternate";
 				if (timeoutDelay){
 					setTimeout(function(node){fadeOutNode(node)},timeoutDelay, node);
 				}
-			},Math.random()*1000,node);
+			} else {
+				setTimeout(function(node){
+					node.style.animation = (Math.random()*10*speed+5*speed)+"s linear "+(Math.random()*-35*speed)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+					if (timeoutDelay){
+						setTimeout(function(node){fadeOutNode(node)},timeoutDelay+500, node);
+					}
+					node.classList.remove("hidden");
+				},Math.random()*1000,node);
+			}
 		});
 		
 		svgs.forEach(img=>{
@@ -581,22 +863,44 @@
 			node.classList.add("emoji");
 			node.classList.add("el-wrap");
 			img.classList.add("el");
-			img.style.animation = "y "+(Math.random()*5+5)+"s linear infinite alternate";
-			img.style.animationDelay = Math.random()*-35+"s";
+			
+			if (floatup){
+				var speedup = Math.pow(Math.random(),0.05)*timeoutDelay;
+				img.style.animation = "y1 "+speedup+"ms reverse linear 1";
+				img.style.transform = "translateY(-"+width+"px)";
+				img.style.top = -1*width+"px";
+				img.style.position = "relative";
+			} else {
+				img.style.animation = "y "+(Math.random()*5*speed+5*speed)+"s linear infinite alternate";
+				img.style.animationDelay = Math.random()*-35*speed+"s";
+			}
+			
 			
 			if (data.type){
 				node.dataset.sourceType = data.type;
 			}
-			setTimeout(function(node){
-				mainOutputWindow.appendChild(node);  // 3s ease-in 1s 2 reverse both paused slidein
-				node.style.animation = (Math.random()*10+5)+"s linear "+(Math.random()*-35)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+			node.classList.add("hidden");
+			mainOutputWindow.appendChild(node)
+			
+			if (floatup){
+				node.classList.remove("hidden");
+				node.style.left = (parseInt(Math.random()*parseInt(window.innerWidth)) + "px");
+				node.style.animation = "x1 "+speedup+"s  ease-in-out infinite alternate";
 				if (timeoutDelay){
-					setTimeout(function(node){fadeOutNode(node)},timeoutDelay, node);
+					setTimeout(function(node){fadeOutNode(node)},timeoutDelay+500, node);
 				}
-			},Math.random()*1000,node);
+			} else {
+				setTimeout(function(node){
+					node.style.animation = (Math.random()*10*speed+5*speed)+"s linear "+(Math.random()*-35*speed)+"s infinite alternate forwards running x, fadeIn 2s normal forwards ease";
+					if (timeoutDelay){
+						setTimeout(function(node){fadeOutNode(node)},timeoutDelay, node);
+					}
+					node.classList.remove("hidden");
+				},Math.random()*1000,node);
+			}
 		});
 		
-		removeNode()
+		// removeNode()
 		
 	}
 

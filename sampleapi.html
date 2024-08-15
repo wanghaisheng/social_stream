@@ -1,14 +1,15 @@
-
-<html>
+<html lang="en">
 <head>
+	<title>Sample API</title>
 	<meta charset="utf-8"/>
-	<link href="https://fonts.googleapis.com/css?family=Press+Start+2P" rel="stylesheet">
     <link href="./nes.min.css" rel="stylesheet" />
 	<style>
 		html, body, pre, code, kbd, samp {
-			font-family:"Press Start 2P";
+			font-family:Arial, Tohoma
 		}
-
+		input {
+			margin:5px;
+		}
 		body{
 			margin:1%;
 			border:0;
@@ -49,13 +50,13 @@
 <h2>
 	Sample app using the Social Stream HTTP/WSS remote control API
 </h2>
-👉🏻Make sure to have <b>&server</b> appended to the social stream dock.html URL if intending to send messages to it directly. (This includes dock-specific actions, like next-in-queue actions)<br />
-<br /> Of course, also ensure you have matching session values; ( for example,👁️ dock.html?session=xxxx&server)
+
+Ensure that you have matching session values, both with this page if testing (for example, dock.html?session=xxxx&server), or used when calling the API itself.
 <br /><br />
-If sending messages/actions to the extension, you just need to make sure the extension is on and the enable-server toggle is enabled in the extension menu.
-<br /><br />
-See <a href='https://github.com/steveseguin/social_stream/blob/main/README.md#server-api-support' target='_blank'>this link for details</a> on how to add these commands to your stream deck or application.
-<br /><br />
+
+See <a href="https://github.com/steveseguin/social_stream/blob/main/README.md#server-api-support" target="_blank">this link for details</a> on how to add these commands to your stream deck or application. 
+<br /><br /><br />As a basic example though, a call that uses a basic GET request would be structured like:<br /><p><b><i>https://io.socialstream.ninja/{sessionID}/{action}/{target}/{value}</i></b>.</p>
+<br />
 <div id="header"></div>
 <div id="target_self"></div>
 <div id="incoming_messages"></div>
@@ -129,7 +130,7 @@ if (urlParams.has("api")){
 	window.history.pushState({path: newurl.toString()}, '', newurl.toString());
 	
 }
-var serverURL = "wss://api.overlay.ninja:443";
+var serverURL = "wss://io.socialstream.ninja:443";
 if (urlParams.has("server")){
 	serverURL = urlParams.get("server") || serverURL;
 }
@@ -176,7 +177,9 @@ function connect(){
 		if (event.data){
 			var data = JSON.parse(event.data);
 			console.log(data);
-			if ("callback" in data){
+			if (!data){
+				console.log("False? so Clear overlay");
+			} else if ("callback" in data){
 				if (data.callback.value == callbackID){
 					alert("Received response. See developer console for the message.");
 				}
@@ -211,8 +214,22 @@ function sendMessage(msg){
 	
 }
 
-function log(msg){
-	console.log(msg);
+function log(msg) {
+	//	console.log(msg);
+}
+
+function warnlog(msg, url = false, lineNumber = false) {
+	//	console.warn(msg);
+	if (lineNumber) {
+		//		console.warn(lineNumber);
+	}
+}
+
+function errorlog(msg, url = false, lineNumber = false) {
+	console.error(msg);
+	if (lineNumber) {
+		console.error(lineNumber);
+	}
 }
 
 function ajax(data) {
@@ -242,7 +259,7 @@ function ajax(data) {
   if (!action || !apiid){
 	alert("no action or api ID provided; request won't work");
   } else {
-	var URL = "https://api.vdo.ninja/"+apiid+"/"+action+"/"+target+"/"+value;
+	var URL = "https://io.socialstream.ninja/"+apiid+"/"+action+"/"+target+"/"+value;
 	xhttp.open("GET", URL, true);
 	xhttp.send();
   }
@@ -264,7 +281,7 @@ function post(data) {
   if (!apiid){
 	alert("no action or api ID provided; request won't work");
   } else {
-	var URL = "https://api.vdo.ninja/"+apiid;
+	var URL = "https://io.socialstream.ninja/"+apiid;
 	xhttp.open("POST", URL, true);
 	xhttp.setRequestHeader("Content-Type", "application/json");
 	xhttp.send(JSON.stringify(data));
@@ -273,12 +290,14 @@ function post(data) {
 
 function loadSelfCommands(){
 	
-	
-	
 	var target_self = document.getElementById("target_self");
 	
 	var title = document.createElement("h2");
 	title.innerText = "Send message to all social sites (Extension-specific)";
+	target_self.appendChild(title);
+	
+	var title = document.createElement("p");
+	title.innerHTML = "If sending messages/actions to the extension directly, you just need to make sure the extension is on and the enable-server toggle is enabled in the extension menu.<br /><br />You can control the draw/waitlist function with this API, but also use it to send messages to the extension<br />";
 	target_self.appendChild(title);
 
 	var input = document.createElement("input");
@@ -288,7 +307,7 @@ function loadSelfCommands(){
 
 	var br = document.createElement("br");
 	target_self.appendChild(br);
-	// https://api.vdo.ninja/XXXXXXXXXX/sendChat/null/Hello
+	// https://io.socialstream.ninja/XXXXXXXXXX/sendChat/null/Hello
 
 	var button = document.createElement("button");
 	button.innerHTML = "Send message via WSS";
@@ -340,9 +359,74 @@ function loadSelfCommands(){
 	};
 	target_self.appendChild(button);
 	
+	var title = document.createElement("h3");
+	title.innerText = "Wait List options";
+	target_self.appendChild(title);
+	
+	
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Clear First User in Wait List";
+	button.onclick = function(){
+
+		var data = {};
+		data.action = "removefromwaitlist";
+		data.value  = 1;
+		sendMessage(JSON.stringify(data)); 
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Clear Second User in Wait List";
+	button.onclick = function(){
+
+		var data = {};
+		data.action = "removefromwaitlist";
+		data.value  = 2;
+		sendMessage(JSON.stringify(data)); 
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Select First User in Wait List";
+	button.onclick = function(){
+
+		var data = {};
+		data.action = "highlightwaitlist";
+		data.value  = 1;
+		sendMessage(JSON.stringify(data)); 
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Select Second User in Wait List";
+	button.onclick = function(){
+
+		var data = {};
+		data.action = "highlightwaitlist";
+		data.value  = 2;
+		sendMessage(JSON.stringify(data)); 
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Select Next Unselected User in Wait List";
+	button.onclick = function(){
+
+		var data = {};
+		data.action = "highlightwaitlist";
+		data.value  = 0;
+		sendMessage(JSON.stringify(data)); 
+	};
+	target_self.appendChild(button);
+	
 	
 	var title = document.createElement("h2");
 	title.innerText = "Dock-specific options";
+	target_self.appendChild(title);
+	
+	var title = document.createElement("p");
+	title.innerHTML = "To use: Make sure to have <b>&server</b> appended to the social stream dock.html URL if intending to send messages to it directly. (This includes dock-specific actions, like next-in-queue actions)<br /><br />Enabling the &server mode also will let you obtain featured messages via the API, via SSE / WSS<br />";
 	target_self.appendChild(title);
 	
 	var button = document.createElement("button");
@@ -350,6 +434,15 @@ function loadSelfCommands(){
 	button.input = input;
 	button.onclick = function(){
 		sendMessage(JSON.stringify({"action":"clearOverlay", "apiid":WID})); 
+		
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Stop and clear all messages (except Pinned)";
+	button.input = input;
+	button.onclick = function(){
+		sendMessage(JSON.stringify({"action":"clearAll", "apiid":WID})); 
 		
 	};
 	target_self.appendChild(button);
@@ -379,6 +472,22 @@ function loadSelfCommands(){
 		ajax({"action":"autoShow","value":"toggle", "apiid":WID});  // true, false, or "toggle"
 	};
 	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Feature next un-featured";
+	button.input = input;
+	button.onclick = function(){
+		ajax({"action":"feature","value":"true", "apiid":WID});  // true, false, or "toggle"
+	};
+	target_self.appendChild(button);
+	
+	var button = document.createElement("button");
+	button.innerHTML = "Feature next pinned msg";
+	button.input = input;
+	button.onclick = function(){
+		ajax({"action":"nextPinned","value":"true", "apiid":WID});  // true, false, or "toggle"
+	};
+	target_self.appendChild(button);
 	////////
 	
 	var br = document.createElement("br");
@@ -392,12 +501,15 @@ function loadSelfCommands(){
 	title.innerHTML = "Fake message <i>from</i> a social site";
 	target_self.appendChild(title);
 	
+	var title = document.createElement("p");
+	title.innerHTML = "There are different ways to fake a message from a social site, if for example you are injecting messages from your own application. You can create a test fake message below, and below that, choose which method you want to send it with.<br />";
+	target_self.appendChild(title);
 	
 	var input = document.createElement("label");
 	target_self.appendChild(input);
 	input.innerText = "Name of sender";
 	var input = document.createElement("input");
-	input.placeholder = "Name of sender)";
+	input.placeholder = "Name of sender";
 	input.style = "width:300px;max-width:50%";
 	input.id = "namesenderfake";
 	input.value = "Bob";
@@ -409,10 +521,30 @@ function loadSelfCommands(){
 	target_self.appendChild(input);
 	input.innerText = "Message";
 	var input = document.createElement("input");
-	input.placeholder = "Message )";
+	input.placeholder = "Message ";
 	input.style = "width:900px;max-width:80%";
 	input.id = "msgfake";
 	input.value = "Looking good! 😘😘😊  This is a test message. 🎶🎵🎵🔨 "; 
+	target_self.appendChild(input);
+	var br = document.createElement("br");
+	target_self.appendChild(br);
+	
+	var input = document.createElement("label");
+	target_self.appendChild(input);
+	input.innerText = "Donation";
+	var input = document.createElement("input");
+	input.placeholder = "Donation";
+	input.id = "donationfake";
+	target_self.appendChild(input);
+	var br = document.createElement("br");
+	target_self.appendChild(br);
+	var input = document.createElement("label");
+	target_self.appendChild(input);
+	input.innerText = "Avatar URL";
+	var input = document.createElement("input");
+	input.style = "width:900px;max-width:80%";
+	input.placeholder = "eg: https://somedomain.com/images/user.png";
+	input.id = "avatarfake";
 	target_self.appendChild(input);
 	
 	
@@ -421,11 +553,8 @@ function loadSelfCommands(){
 	
 	var br = document.createElement("br");
 	target_self.appendChild(br);
-	var br = document.createElement("br");
-	target_self.appendChild(br);
-	
 	var title = document.createElement("h3");
-	title.innerText = "Fake as a Twitch message via POST requset";
+	title.innerText = "Fake this message as a Twitch message via POST request";
 	target_self.appendChild(title);
 	
 	var button = document.createElement("button");
@@ -439,9 +568,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000); // not required, but useful for keeping track of order or assigning message uniquiness
 		
@@ -467,9 +596,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		
@@ -487,7 +616,7 @@ function loadSelfCommands(){
 	/////
 	
 	var title = document.createElement("h3");
-	title.innerText = "Fake as a Twitch message via GET requset";
+	title.innerText = "Fake this message as a Twitch message via GET request";
 	target_self.appendChild(title);
 	
 	var button = document.createElement("button");
@@ -501,9 +630,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		
@@ -532,9 +661,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		
@@ -556,7 +685,7 @@ function loadSelfCommands(){
 	
 	
 	var title = document.createElement("h3");
-	title.innerText = "Fake as a Twitch message via WebSockets";
+	title.innerText = "Fake this message as a Twitch message via WebSockets";
 	target_self.appendChild(title);
 	
 	var button = document.createElement("button");
@@ -570,9 +699,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		
@@ -583,7 +712,7 @@ function loadSelfCommands(){
 		//data.chatbadges.push(html);
 		
 		var message = {};
-		message.extContent = data;
+		message.extContent = data; // just a different structured way of sending messages:  {"action":"content","value":encoded} versus {"extContent":message}
 		//message.apiid = WID; // session ID key 
 
 		sendMessage(JSON.stringify(message)); 
@@ -601,9 +730,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);
 		
@@ -623,6 +752,7 @@ function loadSelfCommands(){
 	
 	var button = document.createElement("button");
 	button.innerHTML = "Server -> dock message (alt)";
+	button.title = "this is the same as the other way, except the JSON structure is at the root, rather than in 'content'";
 	button.onclick = function(){
 
 		var data = {};
@@ -632,9 +762,9 @@ function loadSelfCommands(){
 	//	data.backgroundColor = "";
 	//	data.textColor = "";
 		data.chatmessage =  document.getElementById("msgfake").value;
-	//	data.chatimg = "";
-	//	data.hasDonation = ""; // example:  "100 gold";
-//		data.hasMembership = "";
+		data.chatimg = document.getElementById("avatarfake").value || ""; // will use Twitch API to get avatar is not specified
+		data.hasDonation = document.getElementById("donationfake").value;
+//		data.membership = "";
 		data.type = "twitch"; // twitch.png gets used as an icon, as a result
 		data.id = Date.now() + parseInt(Math.random()*1000000);  // not required, but useful for keeping track of order or assigning message uniquiness
 		
